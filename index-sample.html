@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Puroy Salon — AI-Assisted Demand Forecasting System (Prototype)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --navy:#0D2B3E;
+    --teal:#1A7A8A;
+    --teal-light:#2AABB8;
+    --gold:#E8A838;
+    --cream:#F4F8F9;
+    --card:#FFFFFF;
+    --gray:#64748B;
+    --gray-light:#CBD5E1;
+    --green:#2F855A;
+    --red:#C0392B;
+    --shadow: 0 2px 10px rgba(13,43,62,0.07);
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--cream);
+    color: var(--navy);
+    line-height:1.5;
+  }
+  /* ===== HEADER ===== */
+  header{
+    background: linear-gradient(135deg, var(--navy) 0%, #143C52 100%);
+    color:#fff;
+    padding: 20px 28px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:12px;
+    box-shadow: var(--shadow);
+  }
+  header .brand{display:flex; align-items:center; gap:14px;}
+  header .brand .logo{
+    width:46px;height:46px;border-radius:12px;
+    background: var(--teal);
+    display:flex;align-items:center;justify-content:center;
+    font-size:22px; font-weight:700;
+  }
+  header h1{font-size:18px; font-weight:700;}
+  header .sub{font-size:12px; color:#A9C4D0; margin-top:2px;}
+  header .badge{
+    background: rgba(255,255,255,0.08);
+    border:1px solid rgba(255,255,255,0.18);
+    border-radius:8px;
+    padding:8px 14px;
+    font-size:12px;
+    color:#cfe8ee;
+    text-align:right;
+  }
+  header .badge b{color:#fff; display:block; font-size:13px;}
+
+  /* ===== NAV TABS ===== */
+  nav{
+    background:#fff;
+    border-bottom:1px solid var(--gray-light);
+    display:flex;
+    overflow-x:auto;
+    position:sticky; top:0; z-index:50;
+    box-shadow: var(--shadow);
+  }
+  nav button{
+    flex:1 1 auto;
+    min-width:140px;
+    background:none;
+    border:none;
+    padding:14px 10px;
+    font-size:13px;
+    font-weight:600;
+    color: var(--gray);
+    cursor:pointer;
+    border-bottom:3px solid transparent;
+    transition: all 0.15s;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:4px;
+    white-space:nowrap;
+  }
+  nav button .icon{font-size:18px;}
+  nav button:hover{background: var(--cream); color:var(--teal);}
+  nav button.active{color: var(--teal); border-bottom-color: var(--teal); background: #EBF4F7;}
+
+  /* ===== MAIN ===== */
+  main{
+    max-width:1280px;
+    margin:0 auto;
+    padding:24px;
+  }
+  .page{display:none; animation: fadeIn 0.25s ease;}
+  .page.active{display:block;}
+  @keyframes fadeIn{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);}}
+
+  .page-header{margin-bottom:20px;}
+  .page-header h2{font-size:22px; font-weight:700; color:var(--navy);}
+  .page-header p{font-size:13.5px; color:var(--gray); margin-top:4px; max-width:780px;}
+
+  /* ===== GRID / CARDS ===== */
+  .grid{display:grid; gap:16px;}
+  .grid-4{grid-template-columns: repeat(4, 1fr);}
+  .grid-3{grid-template-columns: repeat(3, 1fr);}
+  .grid-2{grid-template-columns: repeat(2, 1fr);}
+  @media (max-width: 1000px){
+    .grid-4{grid-template-columns: repeat(2, 1fr);}
+    .grid-3{grid-template-columns: repeat(2, 1fr);}
+    .grid-2{grid-template-columns: 1fr;}
+  }
+  @media (max-width: 640px){
+    .grid-4, .grid-3{grid-template-columns: 1fr;}
+  }
+
+  .card{
+    background: var(--card);
+    border-radius:14px;
+    padding:18px;
+    box-shadow: var(--shadow);
+    border:1px solid #EAEFF1;
+  }
+  .card h3{font-size:14px; font-weight:700; margin-bottom:10px; color:var(--navy);}
+  .card .hint{font-size:11.5px; color:var(--gray); margin-top:6px;}
+
+  .kpi{display:flex; flex-direction:column; gap:4px;}
+  .kpi .label{font-size:12px; color:var(--gray); font-weight:600; text-transform:uppercase; letter-spacing:0.04em;}
+  .kpi .value{font-size:26px; font-weight:800; color:var(--navy);}
+  .kpi .delta{font-size:12px; font-weight:600;}
+  .kpi .delta.up{color:var(--green);}
+  .kpi .delta.down{color:var(--red);}
+  .kpi .icon-circle{
+    width:38px;height:38px;border-radius:10px;
+    background: var(--teal); color:#fff;
+    display:flex;align-items:center;justify-content:center;
+    font-size:18px; margin-bottom:8px;
+  }
+
+  /* ===== CONTROLS ===== */
+  .controls{
+    display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+    margin-bottom:16px;
+  }
+  .controls label{font-size:12.5px; font-weight:600; color:var(--gray);}
+  select, input[type=number]{
+    border:1px solid var(--gray-light);
+    border-radius:8px;
+    padding:8px 12px;
+    font-size:13px;
+    color:var(--navy);
+    background:#fff;
+    font-family:inherit;
+  }
+  select:focus, input:focus{outline:2px solid var(--teal-light); outline-offset:1px;}
+
+  /* ===== TABLE ===== */
+  table{width:100%; border-collapse:collapse; font-size:12.5px;}
+  thead th{
+    text-align:left; padding:10px 12px;
+    background: var(--cream);
+    color: var(--gray);
+    font-weight:700;
+    text-transform:uppercase;
+    font-size:10.5px;
+    letter-spacing:0.04em;
+    border-bottom:2px solid var(--gray-light);
+  }
+  tbody td{padding:10px 12px; border-bottom:1px solid #F0F3F4;}
+  tbody tr:hover{background:#F8FBFC;}
+  tbody tr:last-child td{border-bottom:none;}
+
+  .pill{
+    display:inline-block; padding:3px 10px; border-radius:20px;
+    font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;
+  }
+  .pill.green{background:#E6F4EA; color:var(--green);}
+  .pill.red{background:#FCE8E6; color:var(--red);}
+  .pill.gold{background:#FDF1DD; color:#B8780A;}
+  .pill.teal{background:#E3F2F4; color:var(--teal);}
+  .pill.gray{background:#EEF1F3; color:var(--gray);}
+
+  /* ===== CHART CONTAINERS ===== */
+  .chart-wrap{position:relative; height:280px;}
+  .chart-wrap.tall{height:340px;}
+  .chart-wrap.short{height:200px;}
+
+  /* ===== INFO BANNER ===== */
+  .info-banner{
+    background: linear-gradient(135deg, #EBF7F8 0%, #E3F2F4 100%);
+    border:1px solid #C7E5E8;
+    border-radius:12px;
+    padding:14px 18px;
+    font-size:13px;
+    color:var(--navy);
+    margin-bottom:18px;
+    display:flex;
+    gap:12px;
+    align-items:flex-start;
+  }
+  .info-banner .ic{font-size:20px;}
+
+  /* ===== TOOLTIP / EXPLAINER ===== */
+  .explainer{
+    background:#fff;
+    border-left:4px solid var(--teal);
+    border-radius:8px;
+    padding:12px 16px;
+    font-size:12.5px;
+    color:var(--gray);
+    margin-top:14px;
+  }
+  .explainer b{color:var(--navy);}
+
+  /* ===== FOOTER ===== */
+  footer{
+    text-align:center;
+    font-size:11.5px;
+    color:var(--gray);
+    padding:24px;
+  }
+
+  /* ===== TWO-COL LAYOUT ===== */
+  .layout-2{display:grid; grid-template-columns: 1.4fr 1fr; gap:16px;}
+  @media (max-width: 1000px){.layout-2{grid-template-columns:1fr;}}
+
+  /* ===== TAG ROW ===== */
+  .tag-row{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .tag{
+    background:var(--cream); border:1px solid var(--gray-light);
+    border-radius:8px; padding:6px 12px; font-size:11.5px; color:var(--navy); font-weight:600;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="logo">PS</div>
+    <div>
+      <h1>Puroy Salon — Demand Forecasting System</h1>
+      <div class="sub">AI-Assisted Prototype · Tanauan City, Batangas</div>
+    </div>
+  </div>
+  <div class="badge">
+    <b>Data Coverage</b>
+    Nov 2024 – May 2025
+  </div>
+</header>
+
+<nav id="nav">
+  <button class="active" data-page="overview"><span class="icon">📊</span>Overview</button>
+  <button data-page="demand"><span class="icon">📈</span>Demand Forecast</button>
+  <button data-page="inventory"><span class="icon">📦</span>Inventory Forecast</button>
+  <button data-page="financial"><span class="icon">💰</span>Financial Projection</button>
+  <button data-page="staffing"><span class="icon">👥</span>Staffing &amp; Peak Periods</button>
+  <button data-page="about"><span class="icon">ℹ️</span>About</button>
+</nav>
+
+<main>
+
+  <!-- ============ OVERVIEW PAGE ============ -->
+  <section class="page active" id="page-overview">
+    <div class="page-header">
+      <h2>Operations Overview</h2>
+      <p>A snapshot of Puroy Salon's recorded operations from November 2024 to May 2025. This data forms the <b>Input</b> layer of the system's Input-Process-Output model and is the foundation for every forecast shown in the other tabs.</p>
+    </div>
+
+    <div class="grid grid-4" id="overview-kpis"></div>
+
+    <div style="height:18px"></div>
+
+    <div class="grid grid-2">
+      <div class="card">
+        <h3>Monthly Revenue Trend</h3>
+        <div class="chart-wrap"><canvas id="chart-overview-revenue"></canvas></div>
+        <div class="hint">Source: Revenue by Service &amp; Net Income Summary records, Nov 2024 – Apr 2025.</div>
+      </div>
+      <div class="card">
+        <h3>Revenue Share by Service (6-Month Total)</h3>
+        <div class="chart-wrap"><canvas id="chart-overview-services"></canvas></div>
+        <div class="hint">Based on cumulative session and revenue data per service category.</div>
+      </div>
+    </div>
+
+    <div style="height:18px"></div>
+
+    <div class="card">
+      <h3>Recent Daily Operations Log</h3>
+      <div class="controls">
+        <label>Show:</label>
+        <select id="overview-log-range">
+          <option value="14">Last 14 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="all">All recorded days</option>
+        </select>
+      </div>
+      <div style="max-height:340px; overflow:auto;">
+        <table>
+          <thead><tr><th>Date</th><th>Day</th><th>Sessions</th><th>Revenue (₱)</th><th>Expenses (₱)</th><th>Net Income (₱)</th><th>Top Service</th></tr></thead>
+          <tbody id="overview-log-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ DEMAND FORECAST PAGE ============ -->
+  <section class="page" id="page-demand">
+    <div class="page-header">
+      <h2>Service Demand Forecast</h2>
+      <p>Projects how many sessions and how much revenue each service is expected to generate next month, using a weighted moving average of recent monthly trends. This addresses <b>RO2</b> (identifying demand patterns) and the <b>Demand Forecasts</b> output of the IPO model.</p>
+    </div>
+
+    <div class="controls">
+      <label for="demand-service">Select service:</label>
+      <select id="demand-service"></select>
+      <label for="demand-method">Forecast method:</label>
+      <select id="demand-method">
+        <option value="wma">Weighted Moving Average (recommended)</option>
+        <option value="sma">Simple Moving Average</option>
+        <option value="last">Last Month (naive)</option>
+      </select>
+    </div>
+
+    <div class="grid grid-3" id="demand-kpis"></div>
+
+    <div style="height:18px"></div>
+
+    <div class="card">
+      <h3>Sessions Trend &amp; Next-Month Forecast</h3>
+      <div class="chart-wrap tall"><canvas id="chart-demand"></canvas></div>
+      <div class="explainer">
+        <b>How this forecast is calculated:</b> The Weighted Moving Average gives more importance to recent months — the most recent month counts the most, older months count less. This captures momentum in demand while smoothing out one-off spikes (such as December's holiday surge).
+      </div>
+    </div>
+
+    <div style="height:18px"></div>
+
+    <div class="card">
+      <h3>All Services — Next-Month Forecast Summary</h3>
+      <table>
+        <thead><tr><th>Service</th><th>Last Month Sessions</th><th>Forecasted Sessions</th><th>Forecasted Revenue (₱)</th><th>Trend</th></tr></thead>
+        <tbody id="demand-summary-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ INVENTORY FORECAST PAGE ============ -->
+  <section class="page" id="page-inventory">
+    <div class="page-header">
+      <h2>Inventory Forecast &amp; Reorder Planning</h2>
+      <p>Projects next month's consumption for each salon chemical/product, flags items at risk of stockout or overstock, and recommends reorder quantities. This addresses the <b>Inventory Forecasts</b> output of the IPO model and supports <b>RO4</b> (decision-making on inventory management).</p>
+    </div>
+
+    <div class="info-banner">
+      <div class="ic">⚠️</div>
+      <div>
+        <b>Why this matters:</b> Puroy Salon's records show 5 stockout incidents and 2 critical zero-stock incidents for Hair Color and Cellophane Treatment between Dec 2024 and Mar 2025 — directly affecting service availability. Meanwhile, Rebonding Cream and Keratin Solution show consistent overstock, tying up funds in inventory that may expire.
+      </div>
+    </div>
+
+    <div class="grid grid-3" id="inventory-kpis"></div>
+
+    <div style="height:18px"></div>
+
+    <div class="card">
+      <h3>Reorder Recommendations — Next Month Projection</h3>
+      <table>
+        <thead><tr><th>Item</th><th>Unit</th><th>Avg Monthly Use</th><th>Current Stock</th><th>Forecasted Use (Next Month)</th><th>Recommended Reorder</th><th>Status</th></tr></thead>
+        <tbody id="inventory-table-body"></tbody>
+      </table>
+    </div>
+
+    <div style="height:18px"></div>
+
+    <div class="card">
+      <h3>Stock Level Trend</h3>
+      <div class="controls">
+        <label for="inventory-item">Select item:</label>
+        <select id="inventory-item"></select>
+      </div>
+      <div class="chart-wrap"><canvas id="chart-inventory"></canvas></div>
+      <div class="explainer">
+        <b>How reorder quantity is calculated:</b> Recommended Reorder = Forecasted Use for next month − Current Closing Stock, with a small safety buffer (10%) added for items that have previously gone into stockout. If current stock already exceeds forecasted use, no reorder is recommended.
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FINANCIAL PROJECTION PAGE ============ -->
+  <section class="page" id="page-financial">
+    <div class="page-header">
+      <h2>Financial Projection</h2>
+      <p>Projects next month's total revenue, expenses, and net income based on historical monthly trends. This addresses the <b>Financial Projections</b> output of the IPO model and supports <b>RO4</b> (budget planning).</p>
+    </div>
+
+    <div class="grid grid-4" id="financial-kpis"></div>
+
+    <div style="height:18px"></div>
+
+    <div class="grid grid-2">
+      <div class="card">
+        <h3>Revenue vs. Expenses — Historical &amp; Forecast</h3>
+        <div class="chart-wrap tall"><canvas id="chart-financial-rev-exp"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Net Income Trend — Historical &amp; Forecast</h3>
+        <div class="chart-wrap tall"><canvas id="chart-financial-net"></canvas></div>
+      </div>
+    </div>
+
+    <div style="height:18px"></div>
+
+    <div class="card">
+      <h3>Expense Breakdown Forecast — Next Month</h3>
+      <table>
+        <thead><tr><th>Expense Category</th><th>Avg Monthly (₱)</th><th>Last Month (₱)</th><th>Forecasted Next Month (₱)</th><th>% of Total Forecast</th></tr></thead>
+        <tbody id="financial-expense-body"></tbody>
+      </table>
+      <div class="explainer">
+        <b>How this forecast is calculated:</b> Each expense category is projected using a weighted moving average of the past 6 months, the same method used for demand forecasting. Revenue is projected the same way, and Net Income is simply Forecasted Revenue minus Forecasted Total Expenses.
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STAFFING & PEAK PERIODS PAGE ============ -->
+  <section class="page" id="page-staffing">
+    <div class="page-header">
+      <h2>Staffing &amp; Peak Period Forecast</h2>
+      <p>Identifies which days of the week and which months experience the highest demand, helping Puroy Salon plan staff schedules ahead of time. This addresses the <b>Staffing &amp; Peak Periods</b> output of the IPO model and supports <b>RO4</b> (staffing allocation).</p>
+    </div>
+
+    <div class="grid grid-2">
+      <div class="card">
+        <h3>Average Sessions by Day of Week</h3>
+        <div class="chart-wrap"><canvas id="chart-staffing-dow"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Average Revenue by Day of Week</h3>
+        <div class="chart-wrap"><canvas id="chart-staffing-revdow"></canvas></div>
+      </div>
+    </div>
+
+    <div style="height:18px"></div>
+
+    <div class="card">
+      <h3>Recommended Staffing Plan — Next Week</h3>
+      <table>
+        <thead><tr><th>Day</th><th>Avg Sessions (Historical)</th><th>Forecasted Sessions</th><th>Demand Level</th><th>Recommended Staff on Duty</th></tr></thead>
+        <tbody id="staffing-table-body"></tbody>
+      </table>
+      <div class="explainer">
+        <b>How staffing recommendations are derived:</b> Forecasted sessions per day are compared against the overall average. Days that are 15% above average are flagged as <b>High Demand</b> (recommend full staff + 1 on-call), days within ±15% are <b>Normal</b> (standard staffing), and days 15% below average are <b>Low Demand</b> (minimum staffing sufficient).
+      </div>
+    </div>
+
+    <div style="height:18px"></div>
+
+    <div class="card">
+      <h3>Seasonal Peak Note</h3>
+      <p style="font-size:13px; color:var(--gray); line-height:1.7;">
+        Based on the salon's records, <b style="color:var(--navy)">December</b> shows revenue of approximately <b style="color:var(--navy)">₱1,499,850</b> — about <b style="color:var(--navy)">13× the average of the other recorded months</b> (~₱114,400), reflecting an extreme holiday season surge. Salon management should plan for significantly increased staffing, bulk inventory orders, and extended hours leading into December to capture this seasonal demand and avoid the stockouts seen in the Dec–Feb period.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ ABOUT PAGE ============ -->
+  <section class="page" id="page-about">
+    <div class="page-header">
+      <h2>About This Prototype</h2>
+      <p>How this system fits into the thesis "Developing an AI-Assisted Demand Forecasting System for a Beauty Salon."</p>
+    </div>
+
+    <div class="grid grid-2">
+      <div class="card">
+        <h3>What This Prototype Demonstrates</h3>
+        <p style="font-size:13px; color:var(--gray); line-height:1.8;">
+          This is a working prototype built using Puroy Salon's actual 2025 operational records (November 2024 – May 2025). It demonstrates the core functionality envisioned for the full system: turning raw operational data into forward-looking forecasts across four key areas — service demand, inventory, finances, and staffing.
+        </p>
+        <div class="tag-row">
+          <span class="tag">Data Entry &amp; Management</span>
+          <span class="tag">Data Cleaning &amp; Validation</span>
+          <span class="tag">Analytics &amp; Forecasting</span>
+          <span class="tag">Dashboards &amp; Reports</span>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Alignment with the IPO Model</h3>
+        <table>
+          <tr><td style="font-weight:700; padding:6px 0;">INPUT</td><td>Service records, inventory data, overhead costs, salaries, operational logs</td></tr>
+          <tr><td style="font-weight:700; padding:6px 0;">PROCESS</td><td>Data entry → cleaning → analytics &amp; forecasting (this prototype)</td></tr>
+          <tr><td style="font-weight:700; padding:6px 0;">OUTPUT</td><td>Demand, Inventory, Financial, Staffing forecasts + Dashboards (4 tabs)</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div style="height:18px"></div>
+
+    <div class="card">
+      <h3>Forecasting Method Used</h3>
+      <p style="font-size:13px; color:var(--gray); line-height:1.8;">
+        The default forecasting method is a <b style="color:var(--navy)">Weighted Moving Average (WMA)</b>, which gives more importance to recent months while still considering older data. This is a transparent, explainable statistical method — appropriate for a salon's relatively small, monthly-aggregated dataset, and easy for non-technical salon owners and employees to understand and trust (per the Technology Acceptance Model and Information System Success Model in the study's theoretical framework).
+      </p>
+      <p style="font-size:13px; color:var(--gray); line-height:1.8; margin-top:10px;">
+        In the full system, this layer can be extended with more advanced AI/ML models (e.g., regression, ensemble methods) as more historical data becomes available — consistent with the study's "AI-assisted, machine-learning-supported statistical forecasting" framing.
+      </p>
+    </div>
+
+    <div style="height:18px"></div>
+
+    <div class="card">
+      <h3>Data Source</h3>
+      <p style="font-size:13px; color:var(--gray); line-height:1.8;">
+        All figures in this prototype are drawn from Puroy Salon's recorded operational data: a Daily Operations Log (Jan 1 – May 29, 2025, 149 days), a Revenue by Service tracker (Nov 2024 – Apr 2025, 12 services), Monthly Expenses, Net Income Summary, and a Chemical Inventory Tracker (7 products, Nov 2024 – Apr 2025).
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  Prototype developed for the thesis "Developing an AI-Assisted Demand Forecasting System for a Beauty Salon" — Malabanan, Olfato, Rendon · College of Business and Accountancy, LPU–Laguna
+</footer>
+
+<script id="salon-data" type="application/json">{"daily": [{"date": "Jan 01, 2025", "day": "Wednesday", "sessions": 5, "revenue": 2865.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 125.0, "supplies": 4.0, "totalExp": 1264.0, "netIncome": 1601.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Jan 02, 2025", "day": "Thursday", "sessions": 6, "revenue": 3015.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 131.0, "supplies": 3.0, "totalExp": 1269.0, "netIncome": 1746.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "Jan 03, 2025", "day": "Friday", "sessions": 6, "revenue": 3166.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 138.0, "supplies": 5.0, "totalExp": 1278.0, "netIncome": 1888.0, "topService": "Cold Wave Perm"}, {"date": "Jan 04, 2025", "day": "Saturday", "sessions": 7, "revenue": 3920.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 171.0, "supplies": 6.0, "totalExp": 1312.0, "netIncome": 2608.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Jan 05, 2025", "day": "Sunday", "sessions": 7, "revenue": 3618.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 158.0, "supplies": 4.0, "totalExp": 1297.0, "netIncome": 2321.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Jan 06, 2025", "day": "Monday", "sessions": 5, "revenue": 2563.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 112.0, "supplies": 3.0, "totalExp": 1250.0, "netIncome": 1313.0, "topService": "Brazilian Collagen / Botox"}, {"date": "Jan 07, 2025", "day": "Tuesday", "sessions": 5, "revenue": 2714.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 118.0, "supplies": 2.0, "totalExp": 1255.0, "netIncome": 1459.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "Jan 08, 2025", "day": "Wednesday", "sessions": 5, "revenue": 2865.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 125.0, "supplies": 4.0, "totalExp": 1264.0, "netIncome": 1601.0, "topService": "Hair Color / Cellophane"}, {"date": "Jan 09, 2025", "day": "Thursday", "sessions": 6, "revenue": 3015.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 131.0, "supplies": 3.0, "totalExp": 1269.0, "netIncome": 1746.0, "topService": "Hair Color / Cellophane"}, {"date": "Jan 10, 2025", "day": "Friday", "sessions": 6, "revenue": 3166.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 138.0, "supplies": 5.0, "totalExp": 1278.0, "netIncome": 1888.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Jan 11, 2025", "day": "Saturday", "sessions": 7, "revenue": 3920.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 171.0, "supplies": 6.0, "totalExp": 1312.0, "netIncome": 2608.0, "topService": "Cold Wave Perm"}, {"date": "Jan 12, 2025", "day": "Sunday", "sessions": 7, "revenue": 3618.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 158.0, "supplies": 4.0, "totalExp": 1297.0, "netIncome": 2321.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Jan 13, 2025", "day": "Monday", "sessions": 5, "revenue": 2563.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 112.0, "supplies": 4.0, "totalExp": 1251.0, "netIncome": 1312.0, "topService": "Protein Straightening"}, {"date": "Jan 14, 2025", "day": "Tuesday", "sessions": 5, "revenue": 2714.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 118.0, "supplies": 2.0, "totalExp": 1255.0, "netIncome": 1459.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Jan 15, 2025", "day": "Wednesday", "sessions": 5, "revenue": 2865.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 125.0, "supplies": 5.0, "totalExp": 1265.0, "netIncome": 1600.0, "topService": "Hair Color / Cellophane"}, {"date": "Jan 16, 2025", "day": "Thursday", "sessions": 6, "revenue": 3015.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 131.0, "supplies": 5.0, "totalExp": 1271.0, "netIncome": 1744.0, "topService": "Keratin Opti Straight"}, {"date": "Jan 17, 2025", "day": "Friday", "sessions": 6, "revenue": 3166.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 138.0, "supplies": 4.0, "totalExp": 1277.0, "netIncome": 1889.0, "topService": "Foot Spa"}, {"date": "Jan 18, 2025", "day": "Saturday", "sessions": 7, "revenue": 3920.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 171.0, "supplies": 5.0, "totalExp": 1311.0, "netIncome": 2609.0, "topService": "Hair Color / Cellophane"}, {"date": "Jan 19, 2025", "day": "Sunday", "sessions": 7, "revenue": 3618.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 158.0, "supplies": 6.0, "totalExp": 1299.0, "netIncome": 2319.0, "topService": "Hair Color / Cellophane"}, {"date": "Jan 20, 2025", "day": "Monday", "sessions": 5, "revenue": 2563.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 112.0, "supplies": 4.0, "totalExp": 1251.0, "netIncome": 1312.0, "topService": "Hair Color / Cellophane"}, {"date": "Jan 21, 2025", "day": "Tuesday", "sessions": 5, "revenue": 2714.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 118.0, "supplies": 4.0, "totalExp": 1257.0, "netIncome": 1457.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Jan 22, 2025", "day": "Wednesday", "sessions": 5, "revenue": 2865.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 125.0, "supplies": 3.0, "totalExp": 1263.0, "netIncome": 1602.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "Jan 23, 2025", "day": "Thursday", "sessions": 6, "revenue": 3015.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 131.0, "supplies": 3.0, "totalExp": 1269.0, "netIncome": 1746.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "Jan 24, 2025", "day": "Friday", "sessions": 6, "revenue": 3166.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 138.0, "supplies": 3.0, "totalExp": 1276.0, "netIncome": 1890.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "Jan 25, 2025", "day": "Saturday", "sessions": 7, "revenue": 3920.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 171.0, "supplies": 6.0, "totalExp": 1312.0, "netIncome": 2608.0, "topService": "Protein Straightening"}, {"date": "Jan 26, 2025", "day": "Sunday", "sessions": 7, "revenue": 3618.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 158.0, "supplies": 4.0, "totalExp": 1297.0, "netIncome": 2321.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "Jan 27, 2025", "day": "Monday", "sessions": 5, "revenue": 2563.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 112.0, "supplies": 3.0, "totalExp": 1250.0, "netIncome": 1313.0, "topService": "Manicure"}, {"date": "Jan 28, 2025", "day": "Tuesday", "sessions": 5, "revenue": 2714.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 118.0, "supplies": 4.0, "totalExp": 1257.0, "netIncome": 1457.0, "topService": "Hair Color / Cellophane"}, {"date": "Jan 29, 2025", "day": "Wednesday", "sessions": 5, "revenue": 2865.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 125.0, "supplies": 3.0, "totalExp": 1263.0, "netIncome": 1602.0, "topService": "Keratin Opti Straight"}, {"date": "Jan 30, 2025", "day": "Thursday", "sessions": 6, "revenue": 3015.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 131.0, "supplies": 3.0, "totalExp": 1269.0, "netIncome": 1746.0, "topService": "Protein Straightening"}, {"date": "Jan 31, 2025", "day": "Friday", "sessions": 6, "revenue": 3166.0, "electricity": 232.0, "water": 97.0, "salary": 806.0, "commission": 132.0, "supplies": 3380.0, "totalExp": 4647.0, "netIncome": -1481.0, "topService": "Foot Spa"}, {"date": "Feb 01, 2025", "day": "Saturday", "sessions": 10, "revenue": 5188.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 314.0, "supplies": 10.0, "totalExp": 1585.0, "netIncome": 3603.0, "topService": "Hair Color / Cellophane"}, {"date": "Feb 02, 2025", "day": "Sunday", "sessions": 9, "revenue": 4789.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 290.0, "supplies": 9.0, "totalExp": 1560.0, "netIncome": 3229.0, "topService": "Haircut"}, {"date": "Feb 03, 2025", "day": "Monday", "sessions": 6, "revenue": 3392.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 205.0, "supplies": 7.0, "totalExp": 1473.0, "netIncome": 1919.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "Feb 04, 2025", "day": "Tuesday", "sessions": 7, "revenue": 3592.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 217.0, "supplies": 4.0, "totalExp": 1482.0, "netIncome": 2110.0, "topService": "Protein Straightening"}, {"date": "Feb 05, 2025", "day": "Wednesday", "sessions": 7, "revenue": 3791.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 229.0, "supplies": 5.0, "totalExp": 1495.0, "netIncome": 2296.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "Feb 06, 2025", "day": "Thursday", "sessions": 7, "revenue": 3991.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 241.0, "supplies": 9.0, "totalExp": 1511.0, "netIncome": 2480.0, "topService": "Haircut"}, {"date": "Feb 07, 2025", "day": "Friday", "sessions": 8, "revenue": 4190.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 253.0, "supplies": 6.0, "totalExp": 1520.0, "netIncome": 2670.0, "topService": "Cold Wave Perm"}, {"date": "Feb 08, 2025", "day": "Saturday", "sessions": 10, "revenue": 5188.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 314.0, "supplies": 8.0, "totalExp": 1583.0, "netIncome": 3605.0, "topService": "Manicure"}, {"date": "Feb 09, 2025", "day": "Sunday", "sessions": 9, "revenue": 4789.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 290.0, "supplies": 8.0, "totalExp": 1559.0, "netIncome": 3230.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "Feb 10, 2025", "day": "Monday", "sessions": 6, "revenue": 3392.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 205.0, "supplies": 5.0, "totalExp": 1471.0, "netIncome": 1921.0, "topService": "Hair Color / Cellophane"}, {"date": "Feb 11, 2025", "day": "Tuesday", "sessions": 7, "revenue": 3592.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 217.0, "supplies": 5.0, "totalExp": 1483.0, "netIncome": 2109.0, "topService": "Hair Color / Cellophane"}, {"date": "Feb 12, 2025", "day": "Wednesday", "sessions": 7, "revenue": 3791.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 229.0, "supplies": 8.0, "totalExp": 1498.0, "netIncome": 2293.0, "topService": "Protein Straightening"}, {"date": "Feb 13, 2025", "day": "Thursday", "sessions": 7, "revenue": 3991.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 241.0, "supplies": 5.0, "totalExp": 1507.0, "netIncome": 2484.0, "topService": "Foot Spa"}, {"date": "Feb 14, 2025", "day": "Friday", "sessions": 8, "revenue": 4190.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 253.0, "supplies": 7.0, "totalExp": 1521.0, "netIncome": 2669.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Feb 15, 2025", "day": "Saturday", "sessions": 10, "revenue": 5188.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 314.0, "supplies": 6.0, "totalExp": 1581.0, "netIncome": 3607.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Feb 16, 2025", "day": "Sunday", "sessions": 9, "revenue": 4789.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 290.0, "supplies": 9.0, "totalExp": 1560.0, "netIncome": 3229.0, "topService": "Keratin Opti Straight"}, {"date": "Feb 17, 2025", "day": "Monday", "sessions": 6, "revenue": 3392.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 205.0, "supplies": 5.0, "totalExp": 1471.0, "netIncome": 1921.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Feb 18, 2025", "day": "Tuesday", "sessions": 7, "revenue": 3592.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 217.0, "supplies": 6.0, "totalExp": 1484.0, "netIncome": 2108.0, "topService": "Foot Spa"}, {"date": "Feb 19, 2025", "day": "Wednesday", "sessions": 7, "revenue": 3791.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 229.0, "supplies": 7.0, "totalExp": 1497.0, "netIncome": 2294.0, "topService": "Foot Spa"}, {"date": "Feb 20, 2025", "day": "Thursday", "sessions": 7, "revenue": 3991.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 241.0, "supplies": 9.0, "totalExp": 1511.0, "netIncome": 2480.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Feb 21, 2025", "day": "Friday", "sessions": 8, "revenue": 4190.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 253.0, "supplies": 8.0, "totalExp": 1522.0, "netIncome": 2668.0, "topService": "Cold Wave Perm"}, {"date": "Feb 22, 2025", "day": "Saturday", "sessions": 10, "revenue": 5188.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 314.0, "supplies": 9.0, "totalExp": 1584.0, "netIncome": 3604.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "Feb 23, 2025", "day": "Sunday", "sessions": 9, "revenue": 4789.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 290.0, "supplies": 9.0, "totalExp": 1560.0, "netIncome": 3229.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Feb 24, 2025", "day": "Monday", "sessions": 6, "revenue": 3392.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 205.0, "supplies": 5.0, "totalExp": 1471.0, "netIncome": 1921.0, "topService": "Brazilian Collagen / Botox"}, {"date": "Feb 25, 2025", "day": "Tuesday", "sessions": 7, "revenue": 3592.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 217.0, "supplies": 8.0, "totalExp": 1486.0, "netIncome": 2106.0, "topService": "Haircut"}, {"date": "Feb 26, 2025", "day": "Wednesday", "sessions": 7, "revenue": 3791.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 229.0, "supplies": 5.0, "totalExp": 1495.0, "netIncome": 2296.0, "topService": "Brazilian Collagen / Botox"}, {"date": "Feb 27, 2025", "day": "Thursday", "sessions": 7, "revenue": 3991.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 241.0, "supplies": 5.0, "totalExp": 1507.0, "netIncome": 2484.0, "topService": "Manicure"}, {"date": "Feb 28, 2025", "day": "Friday", "sessions": 9, "revenue": 4188.0, "electricity": 261.0, "water": 107.0, "salary": 893.0, "commission": 257.0, "supplies": 4813.0, "totalExp": 6331.0, "netIncome": -2143.0, "topService": "Haircut"}, {"date": "Mar 01, 2025", "day": "Saturday", "sessions": 10, "revenue": 5017.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 313.0, "supplies": 7.0, "totalExp": 1465.0, "netIncome": 3552.0, "topService": "Cold Wave Perm"}, {"date": "Mar 02, 2025", "day": "Sunday", "sessions": 9, "revenue": 4631.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 289.0, "supplies": 8.0, "totalExp": 1442.0, "netIncome": 3189.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Mar 03, 2025", "day": "Monday", "sessions": 6, "revenue": 3280.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 205.0, "supplies": 6.0, "totalExp": 1356.0, "netIncome": 1924.0, "topService": "Hair Color / Cellophane"}, {"date": "Mar 04, 2025", "day": "Tuesday", "sessions": 7, "revenue": 3473.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 217.0, "supplies": 7.0, "totalExp": 1369.0, "netIncome": 2104.0, "topService": "Brazilian Collagen / Botox"}, {"date": "Mar 05, 2025", "day": "Wednesday", "sessions": 7, "revenue": 3666.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 229.0, "supplies": 4.0, "totalExp": 1378.0, "netIncome": 2288.0, "topService": "Protein Straightening"}, {"date": "Mar 06, 2025", "day": "Thursday", "sessions": 7, "revenue": 3859.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 241.0, "supplies": 4.0, "totalExp": 1390.0, "netIncome": 2469.0, "topService": "Manicure"}, {"date": "Mar 07, 2025", "day": "Friday", "sessions": 8, "revenue": 4052.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 253.0, "supplies": 8.0, "totalExp": 1406.0, "netIncome": 2646.0, "topService": "Keratin Opti Straight"}, {"date": "Mar 08, 2025", "day": "Saturday", "sessions": 10, "revenue": 5017.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 313.0, "supplies": 7.0, "totalExp": 1465.0, "netIncome": 3552.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Mar 09, 2025", "day": "Sunday", "sessions": 9, "revenue": 4631.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 289.0, "supplies": 9.0, "totalExp": 1443.0, "netIncome": 3188.0, "topService": "Pedicure"}, {"date": "Mar 10, 2025", "day": "Monday", "sessions": 6, "revenue": 3280.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 205.0, "supplies": 4.0, "totalExp": 1354.0, "netIncome": 1926.0, "topService": "Brazilian Collagen / Botox"}, {"date": "Mar 11, 2025", "day": "Tuesday", "sessions": 7, "revenue": 3473.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 217.0, "supplies": 4.0, "totalExp": 1366.0, "netIncome": 2107.0, "topService": "Keratin Opti Straight"}, {"date": "Mar 12, 2025", "day": "Wednesday", "sessions": 7, "revenue": 3666.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 229.0, "supplies": 7.0, "totalExp": 1381.0, "netIncome": 2285.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Mar 13, 2025", "day": "Thursday", "sessions": 7, "revenue": 3859.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 241.0, "supplies": 6.0, "totalExp": 1392.0, "netIncome": 2467.0, "topService": "Hair Color / Cellophane"}, {"date": "Mar 14, 2025", "day": "Friday", "sessions": 8, "revenue": 4052.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 253.0, "supplies": 5.0, "totalExp": 1403.0, "netIncome": 2649.0, "topService": "Haircut"}, {"date": "Mar 15, 2025", "day": "Saturday", "sessions": 10, "revenue": 5017.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 313.0, "supplies": 7.0, "totalExp": 1465.0, "netIncome": 3552.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "Mar 16, 2025", "day": "Sunday", "sessions": 9, "revenue": 4631.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 289.0, "supplies": 7.0, "totalExp": 1441.0, "netIncome": 3190.0, "topService": "Keratin Opti Straight"}, {"date": "Mar 17, 2025", "day": "Monday", "sessions": 6, "revenue": 3280.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 205.0, "supplies": 4.0, "totalExp": 1354.0, "netIncome": 1926.0, "topService": "Protein Straightening"}, {"date": "Mar 18, 2025", "day": "Tuesday", "sessions": 7, "revenue": 3473.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 217.0, "supplies": 7.0, "totalExp": 1369.0, "netIncome": 2104.0, "topService": "Cold Wave Perm"}, {"date": "Mar 19, 2025", "day": "Wednesday", "sessions": 7, "revenue": 3666.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 229.0, "supplies": 5.0, "totalExp": 1379.0, "netIncome": 2287.0, "topService": "Brazilian Collagen / Botox"}, {"date": "Mar 20, 2025", "day": "Thursday", "sessions": 7, "revenue": 3859.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 241.0, "supplies": 4.0, "totalExp": 1390.0, "netIncome": 2469.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "Mar 21, 2025", "day": "Friday", "sessions": 8, "revenue": 4052.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 253.0, "supplies": 6.0, "totalExp": 1404.0, "netIncome": 2648.0, "topService": "Hair Color / Cellophane"}, {"date": "Mar 22, 2025", "day": "Saturday", "sessions": 10, "revenue": 5017.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 313.0, "supplies": 6.0, "totalExp": 1464.0, "netIncome": 3553.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "Mar 23, 2025", "day": "Sunday", "sessions": 9, "revenue": 4631.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 289.0, "supplies": 5.0, "totalExp": 1439.0, "netIncome": 3192.0, "topService": "Cold Wave Perm"}, {"date": "Mar 24, 2025", "day": "Monday", "sessions": 6, "revenue": 3280.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 205.0, "supplies": 4.0, "totalExp": 1354.0, "netIncome": 1926.0, "topService": "Manicure"}, {"date": "Mar 25, 2025", "day": "Tuesday", "sessions": 7, "revenue": 3473.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 217.0, "supplies": 7.0, "totalExp": 1369.0, "netIncome": 2104.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Mar 26, 2025", "day": "Wednesday", "sessions": 7, "revenue": 3666.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 229.0, "supplies": 5.0, "totalExp": 1379.0, "netIncome": 2287.0, "topService": "Cold Wave Perm"}, {"date": "Mar 27, 2025", "day": "Thursday", "sessions": 7, "revenue": 3859.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 241.0, "supplies": 5.0, "totalExp": 1391.0, "netIncome": 2468.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Mar 28, 2025", "day": "Friday", "sessions": 8, "revenue": 4052.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 253.0, "supplies": 8.0, "totalExp": 1406.0, "netIncome": 2646.0, "topService": "Hair Color / Cellophane"}, {"date": "Mar 29, 2025", "day": "Saturday", "sessions": 10, "revenue": 5017.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 313.0, "supplies": 8.0, "totalExp": 1466.0, "netIncome": 3551.0, "topService": "Keratin Opti Straight"}, {"date": "Mar 30, 2025", "day": "Sunday", "sessions": 9, "revenue": 4631.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 289.0, "supplies": 9.0, "totalExp": 1443.0, "netIncome": 3188.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "Mar 31, 2025", "day": "Monday", "sessions": 3, "revenue": 3280.0, "electricity": 239.0, "water": 100.0, "salary": 806.0, "commission": 210.0, "supplies": 5317.0, "totalExp": 6672.0, "netIncome": -3392.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Apr 01, 2025", "day": "Tuesday", "sessions": 6, "revenue": 3194.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 210.0, "supplies": 5.0, "totalExp": 1408.0, "netIncome": 1786.0, "topService": "Protein Straightening"}, {"date": "Apr 02, 2025", "day": "Wednesday", "sessions": 6, "revenue": 3371.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 222.0, "supplies": 6.0, "totalExp": 1421.0, "netIncome": 1950.0, "topService": "Keratin Opti Straight"}, {"date": "Apr 03, 2025", "day": "Thursday", "sessions": 7, "revenue": 3549.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 233.0, "supplies": 7.0, "totalExp": 1433.0, "netIncome": 2116.0, "topService": "Foot Spa"}, {"date": "Apr 04, 2025", "day": "Friday", "sessions": 7, "revenue": 3726.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 245.0, "supplies": 5.0, "totalExp": 1443.0, "netIncome": 2283.0, "topService": "Protein Straightening"}, {"date": "Apr 05, 2025", "day": "Saturday", "sessions": 9, "revenue": 4613.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 303.0, "supplies": 7.0, "totalExp": 1503.0, "netIncome": 3110.0, "topService": "Haircut"}, {"date": "Apr 06, 2025", "day": "Sunday", "sessions": 8, "revenue": 4259.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 280.0, "supplies": 6.0, "totalExp": 1479.0, "netIncome": 2780.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "Apr 07, 2025", "day": "Monday", "sessions": 6, "revenue": 3016.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 198.0, "supplies": 5.0, "totalExp": 1396.0, "netIncome": 1620.0, "topService": "Protein Straightening"}, {"date": "Apr 08, 2025", "day": "Tuesday", "sessions": 6, "revenue": 3194.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 210.0, "supplies": 5.0, "totalExp": 1408.0, "netIncome": 1786.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "Apr 09, 2025", "day": "Wednesday", "sessions": 6, "revenue": 3371.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 222.0, "supplies": 8.0, "totalExp": 1423.0, "netIncome": 1948.0, "topService": "Brazilian Collagen / Botox"}, {"date": "Apr 10, 2025", "day": "Thursday", "sessions": 7, "revenue": 3549.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 233.0, "supplies": 8.0, "totalExp": 1434.0, "netIncome": 2115.0, "topService": "Hair Color / Cellophane"}, {"date": "Apr 11, 2025", "day": "Friday", "sessions": 7, "revenue": 3726.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 245.0, "supplies": 4.0, "totalExp": 1442.0, "netIncome": 2284.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Apr 12, 2025", "day": "Saturday", "sessions": 9, "revenue": 4613.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 303.0, "supplies": 10.0, "totalExp": 1506.0, "netIncome": 3107.0, "topService": "Foot Spa"}, {"date": "Apr 13, 2025", "day": "Sunday", "sessions": 8, "revenue": 4259.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 280.0, "supplies": 10.0, "totalExp": 1483.0, "netIncome": 2776.0, "topService": "Haircut"}, {"date": "Apr 14, 2025", "day": "Monday", "sessions": 6, "revenue": 3016.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 198.0, "supplies": 4.0, "totalExp": 1395.0, "netIncome": 1621.0, "topService": "Brazilian Collagen / Botox"}, {"date": "Apr 15, 2025", "day": "Tuesday", "sessions": 6, "revenue": 3194.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 210.0, "supplies": 4.0, "totalExp": 1407.0, "netIncome": 1787.0, "topService": "Protein Straightening"}, {"date": "Apr 16, 2025", "day": "Wednesday", "sessions": 6, "revenue": 3371.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 222.0, "supplies": 4.0, "totalExp": 1419.0, "netIncome": 1952.0, "topService": "Protein Straightening"}, {"date": "Apr 17, 2025", "day": "Thursday", "sessions": 7, "revenue": 3549.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 233.0, "supplies": 8.0, "totalExp": 1434.0, "netIncome": 2115.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "Apr 18, 2025", "day": "Friday", "sessions": 7, "revenue": 3726.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 245.0, "supplies": 8.0, "totalExp": 1446.0, "netIncome": 2280.0, "topService": "Brazilian Collagen / Botox"}, {"date": "Apr 19, 2025", "day": "Saturday", "sessions": 9, "revenue": 4613.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 303.0, "supplies": 8.0, "totalExp": 1504.0, "netIncome": 3109.0, "topService": "Pedicure"}, {"date": "Apr 20, 2025", "day": "Sunday", "sessions": 8, "revenue": 4259.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 280.0, "supplies": 10.0, "totalExp": 1483.0, "netIncome": 2776.0, "topService": "Hair Color / Cellophane"}, {"date": "Apr 21, 2025", "day": "Monday", "sessions": 6, "revenue": 3016.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 198.0, "supplies": 6.0, "totalExp": 1397.0, "netIncome": 1619.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Apr 22, 2025", "day": "Tuesday", "sessions": 6, "revenue": 3194.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 210.0, "supplies": 5.0, "totalExp": 1408.0, "netIncome": 1786.0, "topService": "Foot Spa"}, {"date": "Apr 23, 2025", "day": "Wednesday", "sessions": 6, "revenue": 3371.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 222.0, "supplies": 6.0, "totalExp": 1421.0, "netIncome": 1950.0, "topService": "Hair Color / Cellophane"}, {"date": "Apr 24, 2025", "day": "Thursday", "sessions": 7, "revenue": 3549.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 233.0, "supplies": 7.0, "totalExp": 1433.0, "netIncome": 2116.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Apr 25, 2025", "day": "Friday", "sessions": 7, "revenue": 3726.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 245.0, "supplies": 7.0, "totalExp": 1445.0, "netIncome": 2281.0, "topService": "Brazilian Collagen / Botox"}, {"date": "Apr 26, 2025", "day": "Saturday", "sessions": 9, "revenue": 4613.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 303.0, "supplies": 10.0, "totalExp": 1506.0, "netIncome": 3107.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Apr 27, 2025", "day": "Sunday", "sessions": 8, "revenue": 4259.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 280.0, "supplies": 10.0, "totalExp": 1483.0, "netIncome": 2776.0, "topService": "Rebond, Cello, Haircut"}, {"date": "Apr 28, 2025", "day": "Monday", "sessions": 6, "revenue": 3016.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 198.0, "supplies": 4.0, "totalExp": 1395.0, "netIncome": 1621.0, "topService": "Hair Color / Cellophane"}, {"date": "Apr 29, 2025", "day": "Tuesday", "sessions": 6, "revenue": 3194.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 210.0, "supplies": 6.0, "totalExp": 1409.0, "netIncome": 1785.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "Apr 30, 2025", "day": "Wednesday", "sessions": 6, "revenue": 3374.0, "electricity": 253.0, "water": 107.0, "salary": 833.0, "commission": 226.0, "supplies": 5007.0, "totalExp": 6426.0, "netIncome": -3052.0, "topService": "Rebond, Cello, Haircut"}, {"date": "May 01, 2025", "day": "Thursday", "sessions": 7, "revenue": 3833.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 247.0, "supplies": 9.0, "totalExp": 1484.0, "netIncome": 2349.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "May 02, 2025", "day": "Friday", "sessions": 8, "revenue": 4025.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 259.0, "supplies": 8.0, "totalExp": 1495.0, "netIncome": 2530.0, "topService": "Hair Color / Cellophane"}, {"date": "May 03, 2025", "day": "Saturday", "sessions": 10, "revenue": 4983.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 321.0, "supplies": 9.0, "totalExp": 1558.0, "netIncome": 3425.0, "topService": "Hair Color / Cellophane"}, {"date": "May 04, 2025", "day": "Sunday", "sessions": 9, "revenue": 4600.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 296.0, "supplies": 8.0, "totalExp": 1532.0, "netIncome": 3068.0, "topService": "Manicure"}, {"date": "May 05, 2025", "day": "Monday", "sessions": 6, "revenue": 3258.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 210.0, "supplies": 5.0, "totalExp": 1443.0, "netIncome": 1815.0, "topService": "Keratin Opti Straight"}, {"date": "May 06, 2025", "day": "Tuesday", "sessions": 7, "revenue": 3450.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 222.0, "supplies": 5.0, "totalExp": 1455.0, "netIncome": 1995.0, "topService": "Protein Straightening"}, {"date": "May 07, 2025", "day": "Wednesday", "sessions": 7, "revenue": 3642.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 234.0, "supplies": 7.0, "totalExp": 1469.0, "netIncome": 2173.0, "topService": "Protein Straightening"}, {"date": "May 08, 2025", "day": "Thursday", "sessions": 7, "revenue": 3833.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 247.0, "supplies": 6.0, "totalExp": 1481.0, "netIncome": 2352.0, "topService": "Keratin Opti Straight"}, {"date": "May 09, 2025", "day": "Friday", "sessions": 8, "revenue": 4025.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 259.0, "supplies": 5.0, "totalExp": 1492.0, "netIncome": 2533.0, "topService": "Brazilian Collagen / Botox"}, {"date": "May 10, 2025", "day": "Saturday", "sessions": 10, "revenue": 4983.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 321.0, "supplies": 12.0, "totalExp": 1561.0, "netIncome": 3422.0, "topService": "Foot Spa"}, {"date": "May 11, 2025", "day": "Sunday", "sessions": 9, "revenue": 4600.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 296.0, "supplies": 6.0, "totalExp": 1530.0, "netIncome": 3070.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "May 12, 2025", "day": "Monday", "sessions": 6, "revenue": 3258.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 210.0, "supplies": 5.0, "totalExp": 1443.0, "netIncome": 1815.0, "topService": "Manicure"}, {"date": "May 13, 2025", "day": "Tuesday", "sessions": 7, "revenue": 3450.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 222.0, "supplies": 8.0, "totalExp": 1458.0, "netIncome": 1992.0, "topService": "Haircut"}, {"date": "May 14, 2025", "day": "Wednesday", "sessions": 7, "revenue": 3642.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 234.0, "supplies": 6.0, "totalExp": 1468.0, "netIncome": 2174.0, "topService": "Rebond, Cello, Haircut"}, {"date": "May 15, 2025", "day": "Thursday", "sessions": 7, "revenue": 3833.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 247.0, "supplies": 9.0, "totalExp": 1484.0, "netIncome": 2349.0, "topService": "Cold Wave Perm"}, {"date": "May 16, 2025", "day": "Friday", "sessions": 8, "revenue": 4025.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 259.0, "supplies": 8.0, "totalExp": 1495.0, "netIncome": 2530.0, "topService": "Foot Spa"}, {"date": "May 17, 2025", "day": "Saturday", "sessions": 10, "revenue": 4983.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 321.0, "supplies": 10.0, "totalExp": 1559.0, "netIncome": 3424.0, "topService": "Rebond, Cello, Haircut"}, {"date": "May 18, 2025", "day": "Sunday", "sessions": 9, "revenue": 4600.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 296.0, "supplies": 10.0, "totalExp": 1534.0, "netIncome": 3066.0, "topService": "Protein Straightening"}, {"date": "May 19, 2025", "day": "Monday", "sessions": 6, "revenue": 3258.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 210.0, "supplies": 7.0, "totalExp": 1445.0, "netIncome": 1813.0, "topService": "Pedicure"}, {"date": "May 20, 2025", "day": "Tuesday", "sessions": 7, "revenue": 3450.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 222.0, "supplies": 5.0, "totalExp": 1455.0, "netIncome": 1995.0, "topService": "Rebond, Cello, Haircut"}, {"date": "May 21, 2025", "day": "Wednesday", "sessions": 7, "revenue": 3642.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 234.0, "supplies": 5.0, "totalExp": 1467.0, "netIncome": 2175.0, "topService": "Hair Color / Cellophane"}, {"date": "May 22, 2025", "day": "Thursday", "sessions": 7, "revenue": 3833.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 247.0, "supplies": 6.0, "totalExp": 1481.0, "netIncome": 2352.0, "topService": "Hair Color / Cellophane"}, {"date": "May 23, 2025", "day": "Friday", "sessions": 8, "revenue": 4025.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 259.0, "supplies": 8.0, "totalExp": 1495.0, "netIncome": 2530.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "May 24, 2025", "day": "Saturday", "sessions": 10, "revenue": 4983.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 321.0, "supplies": 10.0, "totalExp": 1559.0, "netIncome": 3424.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "May 25, 2025", "day": "Sunday", "sessions": 9, "revenue": 4600.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 296.0, "supplies": 8.0, "totalExp": 1532.0, "netIncome": 3068.0, "topService": "Manicure"}, {"date": "May 26, 2025", "day": "Monday", "sessions": 6, "revenue": 3258.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 210.0, "supplies": 7.0, "totalExp": 1445.0, "netIncome": 1813.0, "topService": "Rebond, Cello, Haircut"}, {"date": "May 27, 2025", "day": "Tuesday", "sessions": 7, "revenue": 3450.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 222.0, "supplies": 6.0, "totalExp": 1456.0, "netIncome": 1994.0, "topService": "Rebond + Brazilian Collagen"}, {"date": "May 28, 2025", "day": "Wednesday", "sessions": 7, "revenue": 3642.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 234.0, "supplies": 4.0, "totalExp": 1466.0, "netIncome": 2176.0, "topService": "Keratin Opti Straight"}, {"date": "May 29, 2025", "day": "Thursday", "sessions": 4, "revenue": 3836.0, "electricity": 259.0, "water": 107.0, "salary": 862.0, "commission": 244.0, "supplies": 5298.0, "totalExp": 6770.0, "netIncome": -2934.0, "topService": "Cold Wave Perm"}], "services": [{"name": "Rebond, Cello, Haircut", "monthly": {"NOV": {"sessions": 18, "revenue": 19800.0}, "DEC": {"sessions": 195, "revenue": 214500.0}, "JAN": {"sessions": 14, "revenue": 15400.0}, "FEB": {"sessions": 16, "revenue": 17600.0}, "MAR": {"sessions": 17, "revenue": 18700.0}, "APR": {"sessions": 15, "revenue": 16500.0}}}, {"name": "Rebond, Cello + Brazilian Collagen", "monthly": {"NOV": {"sessions": 9, "revenue": 17100.0}, "DEC": {"sessions": 106, "revenue": 201400.0}, "JAN": {"sessions": 7, "revenue": 13300.0}, "FEB": {"sessions": 8, "revenue": 15200.0}, "MAR": {"sessions": 9, "revenue": 17100.0}, "APR": {"sessions": 8, "revenue": 15200.0}}}, {"name": "Protein Straightening Treatment", "monthly": {"NOV": {"sessions": 11, "revenue": 19250.0}, "DEC": {"sessions": 125, "revenue": 218750.0}, "JAN": {"sessions": 8, "revenue": 14000.0}, "FEB": {"sessions": 10, "revenue": 17500.0}, "MAR": {"sessions": 11, "revenue": 19250.0}, "APR": {"sessions": 10, "revenue": 17500.0}}}, {"name": "Brazilian Collagen / Hair Botox", "monthly": {"NOV": {"sessions": 14, "revenue": 11200.0}, "DEC": {"sessions": 159, "revenue": 127200.0}, "JAN": {"sessions": 11, "revenue": 8800.0}, "FEB": {"sessions": 13, "revenue": 10400.0}, "MAR": {"sessions": 14, "revenue": 11200.0}, "APR": {"sessions": 12, "revenue": 9600.0}}}, {"name": "Hair Color / Cellophane Treatment", "monthly": {"NOV": {"sessions": 18, "revenue": 10800.0}, "DEC": {"sessions": 212, "revenue": 127200.0}, "JAN": {"sessions": 14, "revenue": 8400.0}, "FEB": {"sessions": 17, "revenue": 10200.0}, "MAR": {"sessions": 18, "revenue": 10800.0}, "APR": {"sessions": 16, "revenue": 9600.0}}}, {"name": "Cold Wave Perm", "monthly": {"NOV": {"sessions": 12, "revenue": 12000.0}, "DEC": {"sessions": 144, "revenue": 144000.0}, "JAN": {"sessions": 9, "revenue": 9000.0}, "FEB": {"sessions": 11, "revenue": 11000.0}, "MAR": {"sessions": 12, "revenue": 12000.0}, "APR": {"sessions": 11, "revenue": 11000.0}}}, {"name": "Keratin Opti Straight", "monthly": {"NOV": {"sessions": 5, "revenue": 15000.0}, "DEC": {"sessions": 72, "revenue": 216000.0}, "JAN": {"sessions": 4, "revenue": 12000.0}, "FEB": {"sessions": 5, "revenue": 15000.0}, "MAR": {"sessions": 5, "revenue": 15000.0}, "APR": {"sessions": 4, "revenue": 12000.0}}}, {"name": "Haircut", "monthly": {"NOV": {"sessions": 42, "revenue": 5880.0}, "DEC": {"sessions": 500, "revenue": 70000.0}, "JAN": {"sessions": 32, "revenue": 4480.0}, "FEB": {"sessions": 38, "revenue": 5320.0}, "MAR": {"sessions": 42, "revenue": 5880.0}, "APR": {"sessions": 37, "revenue": 5180.0}}}, {"name": "Kilay (Eyebrow)", "monthly": {"NOV": {"sessions": 35, "revenue": 2450.0}, "DEC": {"sessions": 422, "revenue": 29540.0}, "JAN": {"sessions": 27, "revenue": 1890.0}, "FEB": {"sessions": 32, "revenue": 2240.0}, "MAR": {"sessions": 36, "revenue": 2520.0}, "APR": {"sessions": 31, "revenue": 2170.0}}}, {"name": "Manicure", "monthly": {"NOV": {"sessions": 30, "revenue": 4200.0}, "DEC": {"sessions": 374, "revenue": 52360.0}, "JAN": {"sessions": 23, "revenue": 3220.0}, "FEB": {"sessions": 28, "revenue": 3920.0}, "MAR": {"sessions": 31, "revenue": 4340.0}, "APR": {"sessions": 27, "revenue": 3780.0}}}, {"name": "Pedicure", "monthly": {"NOV": {"sessions": 26, "revenue": 3900.0}, "DEC": {"sessions": 326, "revenue": 48900.0}, "JAN": {"sessions": 20, "revenue": 3000.0}, "FEB": {"sessions": 24, "revenue": 3600.0}, "MAR": {"sessions": 27, "revenue": 4050.0}, "APR": {"sessions": 23, "revenue": 3450.0}}}, {"name": "Foot Spa", "monthly": {"NOV": {"sessions": 16, "revenue": 4000.0}, "DEC": {"sessions": 200, "revenue": 50000.0}, "JAN": {"sessions": 12, "revenue": 3000.0}, "FEB": {"sessions": 15, "revenue": 3750.0}, "MAR": {"sessions": 16, "revenue": 4000.0}, "APR": {"sessions": 14, "revenue": 3500.0}}}], "expenses": {"Electricity": {"NOV": 7500.0, "DEC": 9000.0, "JAN": 7200.0, "FEB": 7300.0, "MAR": 7400.0, "APR": 7600.0}, "Water": {"NOV": 3000.0, "DEC": 3500.0, "JAN": 3000.0, "FEB": 3000.0, "MAR": 3100.0, "APR": 3200.0}, "Helper's Salary": {"NOV": 25000.0, "DEC": 25000.0, "JAN": 25000.0, "FEB": 25000.0, "MAR": 25000.0, "APR": 25000.0}, "Beautician Commission": {"NOV": 6000.0, "DEC": 13500.0, "JAN": 4200.0, "FEB": 7000.0, "MAR": 7800.0, "APR": 7200.0}, "Supplies / Materials": {"NOV": 4500.0, "DEC": 8000.0, "JAN": 3500.0, "FEB": 5000.0, "MAR": 5500.0, "APR": 5200.0}, "TOTAL EXPENSES": {"NOV": 46000.0, "DEC": 59000.0, "JAN": 42900.0, "FEB": 47300.0, "MAR": 48800.0, "APR": 48200.0}}, "netIncome": {"Total Revenue (Ph.P)": {"NOV": 125580.0, "DEC": 1499850.0, "JAN": 96490.0, "FEB": 115730.0, "MAR": 124840.0, "APR": 109480.0}, "Total Expenses (Ph.P)": {"NOV": 46000.0, "DEC": 59000.0, "JAN": 42900.0, "FEB": 47300.0, "MAR": 48800.0, "APR": 48200.0}, "NET INCOME (Ph.P)": {"NOV": 79580.0, "DEC": 1440850.0, "JAN": 53590.0, "FEB": 68430.0, "MAR": 76040.0, "APR": 61280.0}}, "inventory": [{"name": "Hair Color (Mixed Shades)", "unit": "tubes", "records": [{"month": "NOV", "opening": 80.0, "purchased": 60.0, "used": 135.0, "closing": 5.0, "status": "LOW"}, {"month": "DEC", "opening": 5.0, "purchased": 50.0, "used": 178.0, "closing": -123.0, "status": "STOCKOUT"}, {"month": "JAN", "opening": 0.0, "purchased": 90.0, "used": 109.0, "closing": -19.0, "status": "STOCKOUT"}, {"month": "FEB", "opening": 0.0, "purchased": 120.0, "used": 149.0, "closing": -29.0, "status": "STOCKOUT"}, {"month": "MAR", "opening": 0.0, "purchased": 160.0, "used": 160.0, "closing": 0.0, "status": "CRITICAL"}, {"month": "APR", "opening": 0.0, "purchased": 145.0, "used": 144.0, "closing": 1.0, "status": "LOW"}]}, {"name": "Cellophane Treatment", "unit": "sachets", "records": [{"month": "NOV", "opening": 60.0, "purchased": 40.0, "used": 75.0, "closing": 25.0, "status": "OK"}, {"month": "DEC", "opening": 25.0, "purchased": 30.0, "used": 155.0, "closing": -100.0, "status": "STOCKOUT"}, {"month": "JAN", "opening": 0.0, "purchased": 80.0, "used": 99.0, "closing": -19.0, "status": "STOCKOUT"}, {"month": "FEB", "opening": 0.0, "purchased": 110.0, "used": 130.0, "closing": -20.0, "status": "STOCKOUT"}, {"month": "MAR", "opening": 0.0, "purchased": 135.0, "used": 135.0, "closing": 0.0, "status": "CRITICAL"}, {"month": "APR", "opening": 0.0, "purchased": 130.0, "used": 125.0, "closing": 5.0, "status": "LOW"}]}, {"name": "Rebonding Cream", "unit": "kits", "records": [{"month": "NOV", "opening": 30.0, "purchased": 80.0, "used": 22.0, "closing": 88.0, "status": "EXCESS"}, {"month": "DEC", "opening": 88.0, "purchased": 60.0, "used": 30.0, "closing": 118.0, "status": "EXCESS"}, {"month": "JAN", "opening": 118.0, "purchased": 20.0, "used": 17.0, "closing": 121.0, "status": "EXCESS"}, {"month": "FEB", "opening": 121.0, "purchased": 10.0, "used": 22.0, "closing": 109.0, "status": "EXCESS"}, {"month": "MAR", "opening": 109.0, "purchased": 10.0, "used": 24.0, "closing": 95.0, "status": "EXCESS"}, {"month": "APR", "opening": 95.0, "purchased": 10.0, "used": 22.0, "closing": 83.0, "status": "EXCESS"}]}, {"name": "Neutralizer", "unit": "bottles", "records": [{"month": "NOV", "opening": 25.0, "purchased": 70.0, "used": 20.0, "closing": 75.0, "status": "EXCESS"}, {"month": "DEC", "opening": 75.0, "purchased": 50.0, "used": 28.0, "closing": 97.0, "status": "EXCESS"}, {"month": "JAN", "opening": 97.0, "purchased": 15.0, "used": 14.0, "closing": 98.0, "status": "EXCESS"}, {"month": "FEB", "opening": 98.0, "purchased": 10.0, "used": 19.0, "closing": 89.0, "status": "EXCESS"}, {"month": "MAR", "opening": 89.0, "purchased": 10.0, "used": 21.0, "closing": 78.0, "status": "EXCESS"}, {"month": "APR", "opening": 78.0, "purchased": 10.0, "used": 20.0, "closing": 68.0, "status": "EXCESS"}]}, {"name": "Keratin Solution", "unit": "bottles", "records": [{"month": "NOV", "opening": 20.0, "purchased": 30.0, "used": 8.0, "closing": 42.0, "status": "OVERSTOCK"}, {"month": "DEC", "opening": 42.0, "purchased": 25.0, "used": 10.0, "closing": 57.0, "status": "OVERSTOCK"}, {"month": "JAN", "opening": 57.0, "purchased": 5.0, "used": 6.0, "closing": 56.0, "status": "OVERSTOCK"}, {"month": "FEB", "opening": 56.0, "purchased": 5.0, "used": 9.0, "closing": 52.0, "status": "OVERSTOCK"}, {"month": "MAR", "opening": 52.0, "purchased": 5.0, "used": 10.0, "closing": 47.0, "status": "OVERSTOCK"}, {"month": "APR", "opening": 47.0, "purchased": 5.0, "used": 9.0, "closing": 43.0, "status": "OVERSTOCK"}]}, {"name": "Bleaching Powder", "unit": "packs", "records": [{"month": "NOV", "opening": 15.0, "purchased": 50.0, "used": 12.0, "closing": 53.0, "status": "OVERSTOCK"}, {"month": "DEC", "opening": 53.0, "purchased": 30.0, "used": 15.0, "closing": 68.0, "status": "EXCESS"}, {"month": "JAN", "opening": 68.0, "purchased": 10.0, "used": 8.0, "closing": 70.0, "status": "EXCESS"}, {"month": "FEB", "opening": 70.0, "purchased": 5.0, "used": 10.0, "closing": 65.0, "status": "EXCESS"}, {"month": "MAR", "opening": 65.0, "purchased": 5.0, "used": 11.0, "closing": 59.0, "status": "OVERSTOCK"}, {"month": "APR", "opening": 59.0, "purchased": 5.0, "used": 10.0, "closing": 54.0, "status": "OVERSTOCK"}]}, {"name": "Developer (20vol/30vol)", "unit": "liters", "records": [{"month": "NOV", "opening": 10.0, "purchased": 40.0, "used": 14.0, "closing": 36.0, "status": "OVERSTOCK"}, {"month": "DEC", "opening": 36.0, "purchased": 20.0, "used": 16.0, "closing": 40.0, "status": "OVERSTOCK"}, {"month": "JAN", "opening": 40.0, "purchased": 8.0, "used": 9.0, "closing": 39.0, "status": "OVERSTOCK"}, {"month": "FEB", "opening": 39.0, "purchased": 5.0, "used": 11.0, "closing": 33.0, "status": "OVERSTOCK"}, {"month": "MAR", "opening": 33.0, "purchased": 5.0, "used": 12.0, "closing": 26.0, "status": "OK"}, {"month": "APR", "opening": 26.0, "purchased": 5.0, "used": 11.0, "closing": 20.0, "status": "OK"}]}], "months": ["NOV", "DEC", "JAN", "FEB", "MAR", "APR"], "monthNames": {"NOV": "Nov 2024", "DEC": "Dec 2024", "JAN": "Jan 2025", "FEB": "Feb 2025", "MAR": "Mar 2025", "APR": "Apr 2025"}}</script>
+<script src="app.js"></script>
+</body>
+</html>
