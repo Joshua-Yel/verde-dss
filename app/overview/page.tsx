@@ -2,7 +2,7 @@ import React, { Suspense } from 'react';
 import Card from '../../components/Card';
 import LineChart from '../../components/LineChart';
 import RevenuePieChart from '../../components/RevenuePieChart';
-import FilterSpan from '../../components/FilterSpan';
+import DailyLogSection from '../../components/DailyLogSection';
 import {
   getKPIsOverview,
   getRevenueSeries,
@@ -30,7 +30,7 @@ export default async function OverviewPage({ searchParams }: PageProps) {
     searchParams && typeof searchParams === 'object' && 'then' in searchParams
       ? await searchParams
       : searchParams || {};
-  const currentSpan = resolvedParams?.span || "14";
+  const currentSpan = resolvedParams?.span || '14';
 
   const kpis = await getKPIsOverview();
   const revenue = await getRevenueSeries();
@@ -38,6 +38,18 @@ export default async function OverviewPage({ searchParams }: PageProps) {
   const restock = await getRestockList();
   const svcTable = await getServicesForecastTable();
   const dailyLog = await getDailyLog() ?? [];
+
+  const spanDays = currentSpan === 'all' ? null : Number(currentSpan);
+  const spanThreshold = spanDays && !Number.isNaN(spanDays)
+    ? new Date(Date.now() - (spanDays - 1) * 24 * 60 * 60 * 1000)
+    : null;
+
+  const filteredDailyLog = spanThreshold
+    ? dailyLog.filter((row) => {
+        const rowDate = new Date(row.date);
+        return !Number.isNaN(rowDate.getTime()) && rowDate >= spanThreshold;
+      })
+    : dailyLog;
 
   return (
     <div className="space-y-6 mx-auto p-4 md:p-6 text-foreground bg-background transition-colors duration-200">
@@ -227,59 +239,7 @@ export default async function OverviewPage({ searchParams }: PageProps) {
         </div>
       </div>
 
-      {/* LOG */}
-      <div className="rounded-xl border border-border bg-card shadow-xs overflow-hidden">
-        <div className="p-4 bg-muted/40 border-b border-border/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold tracking-tight text-foreground">Daily Log</h3>
-            <p className="text-[11px] text-muted-foreground mt-0.5">Day-by-day revenue, expenses, and top service.</p>
-          </div>
-
-          <Suspense fallback={<div className="h-8 w-32 bg-muted animate-pulse rounded-lg" />}>
-            <FilterSpan />
-          </Suspense>
-        </div>
-
-        <div className="p-2 overflow-x-auto">
-          <Table>
-            <TableCaption className="text-[11px] text-muted-foreground pb-2">End-of-day record.</TableCaption>
-            <TableHeader>
-              <TableRow className="border-border hover:bg-transparent">
-                <TableHead className="w-[120px] text-muted-foreground font-semibold text-xs uppercase tracking-wide">Date</TableHead>
-                <TableHead className="text-muted-foreground font-semibold text-xs uppercase tracking-wide">Day</TableHead>
-                <TableHead className="text-muted-foreground font-semibold text-xs uppercase tracking-wide">Sessions</TableHead>
-                <TableHead className="text-right text-muted-foreground font-semibold text-xs uppercase tracking-wide">Revenue</TableHead>
-                <TableHead className="text-right text-muted-foreground font-semibold text-xs uppercase tracking-wide">Expenses</TableHead>
-                <TableHead className="text-right text-muted-foreground font-semibold text-xs uppercase tracking-wide">Net</TableHead>
-                <TableHead className="text-right text-muted-foreground font-semibold text-xs uppercase tracking-wide">Top Service</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {dailyLog.length > 0 ? (
-                dailyLog.map((row) => (
-                  <TableRow key={`${row.date}-${row.topService}`} className="border-border hover:bg-muted/40 transition-colors group">
-                    <TableCell className="font-mono text-xs font-medium text-foreground group-hover:text-primary transition-colors">{row.date}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{row.day}</TableCell>
-                    <TableCell className="font-mono text-xs text-foreground/90">{row.sessions ?? '—'}</TableCell>
-                    <TableCell className="text-right font-mono text-xs text-muted-foreground">{typeof row.revenue === 'number' ? `₱${row.revenue.toLocaleString()}` : '—'}</TableCell>
-                    <TableCell className="text-right font-mono text-xs text-muted-foreground">{typeof row.expenses === 'number' ? `₱${row.expenses.toLocaleString()}` : '—'}</TableCell>
-                    <TableCell className="text-right font-mono text-xs font-semibold" style={{ color: 'hsl(var(--success))' }}>
-                      {typeof row.net === 'number' ? `₱${row.net.toLocaleString()}` : '—'}
-                    </TableCell>
-                    <TableCell className="text-right text-xs font-medium text-foreground">{row.topService}</TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow className="border-border">
-                  <TableCell className="py-4 text-center text-xs text-muted-foreground" colSpan={7}>
-                    No daily log data available.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
+      <DailyLogSection dailyLog={dailyLog} />
 
     </div>
   );
