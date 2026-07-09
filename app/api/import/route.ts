@@ -66,30 +66,34 @@ function normalizeDate(value: unknown): string | null {
   return parsed.toISOString().slice(0, 10)
 }
 
-// Resolves (or creates) a business owned by the current user.
-// Centralized so every import mode uses the same logic.
+// Resolves the business that belongs to the current user.
+// Each account has exactly one business (created at signup) — imports
+// always attach to that business. A "business_name" column in the
+// spreadsheet, if present, is informational only and is NOT used to
+// look up or create a different business row. Matching by name previously
+// caused duplicate business rows per user whenever the sheet's name didn't
+// exactly match the one entered at signup.
 async function resolveBusinessId(
   ownerId: string,
-  businessName: string | null,
   filename: string | undefined
 ): Promise<{ businessId: string } | { error: NextResponse }> {
-  if (businessName) {
-    const { data: businessData } = await supabaseServer
-      .from('businesses')
-      .select('id')
-      .eq('owner_id', ownerId)
-      .eq('name', businessName)
-      .limit(1)
-    if (businessData && businessData[0]?.id) {
-      return { businessId: businessData[0].id }
-    }
+  const { data: businessData } = await supabaseServer
+    .from('businesses')
+    .select('id')
+    .eq('owner_id', ownerId)
+    .order('created_at', { ascending: true })
+    .limit(1)
+
+  if (businessData && businessData[0]?.id) {
+    return { businessId: businessData[0].id }
   }
 
-  const newName = businessName ?? filename ?? 'Imported business'
+  // Fallback: user somehow has no business row yet. Create a minimal one
+  // so the import doesn't fail outright.
   const businessIdCandidate = randomUUID()
   const insertBusiness = await supabaseServer
     .from('businesses')
-    .insert({ id: businessIdCandidate, name: newName, owner_id: ownerId })
+    .insert({ id: businessIdCandidate, name: filename ?? 'My business', owner_id: ownerId })
     .select('id')
 
   if (insertBusiness.error || !insertBusiness.data || insertBusiness.data.length === 0) {
@@ -168,8 +172,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Server is not configured for Supabase writes' }, { status: 500 })
       }
 
-      const businessName = normalizeString((rows as ImportedRow[])[0]?.business_name)
-      const resolved = await resolveBusinessId(user.id, businessName, filename)
+      const resolved = await resolveBusinessId(user.id, filename)
       if ('error' in resolved) return resolved.error
       const businessId = resolved.businessId
 
@@ -293,8 +296,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Server is not configured for Supabase writes' }, { status: 500 })
       }
 
-      const businessName = normalizeString((rows as ImportedRow[])[0]?.business_name)
-      const resolved = await resolveBusinessId(user.id, businessName, filename)
+      const resolved = await resolveBusinessId(user.id, filename)
       if ('error' in resolved) return resolved.error
       const businessId = resolved.businessId
 
@@ -347,8 +349,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Server is not configured for Supabase writes' }, { status: 500 })
     }
 
-    const businessName = mapped[0]?.business_name ?? null
-    const resolved = await resolveBusinessId(user.id, businessName, filename)
+    const resolved = await resolveBusinessId(user.id, filename)
     if ('error' in resolved) return resolved.error
     const businessId = resolved.businessId
 

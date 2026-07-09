@@ -61,8 +61,16 @@ function buildSeriesFromOperations(rows: OperationRow[], monthLabels: string[]) 
   return monthLabels.map((month) => monthMap.get(month) ?? 0);
 }
 
-export async function getSupabaseDashboardData() {
+// IMPORTANT: userId is required. This function must only ever return data
+// belonging to the given user's own business — never "any" business found
+// in the tables. supabaseServer uses the service-role key, which bypasses
+// RLS entirely, so scoping happens here in application code, not the DB.
+export async function getSupabaseDashboardData(userId: string) {
   const client = supabaseServer as any;
+
+  if (!userId) {
+    throw new Error('getSupabaseDashboardData requires a userId — refusing to load unscoped data.');
+  }
 
   if (!client || typeof client.from !== 'function') {
     return {
@@ -85,24 +93,17 @@ export async function getSupabaseDashboardData() {
     };
   }
 
-  const [
-    { data: inventoryFallback },
-    { data: servicesFallback },
-    { data: operationsFallback },
-    { data: businesses },
-  ] = await Promise.all([
-    client.from('inventory_items').select('business_id').limit(1),
-    client.from('services').select('business_id').limit(1),
-    client.from('daily_operations').select('business_id').limit(1),
-    client.from('businesses').select('id,name').limit(1),
-  ]);
+  // Resolve the business belonging to THIS user only. We do NOT fall back to
+  // scanning inventory_items/services/daily_operations for "any" business_id —
+  // that was the bug: it silently returned whichever row was first in the
+  // table, regardless of who was logged in.
+  const { data: businesses } = await client
+    .from('businesses')
+    .select('id,name')
+    .eq('owner_id', userId)
+    .limit(1);
 
-  let businessId =
-    inventoryFallback?.[0]?.business_id ??
-    servicesFallback?.[0]?.business_id ??
-    operationsFallback?.[0]?.business_id ??
-    businesses?.[0]?.id ??
-    null;
+  const businessId = businesses?.[0]?.id ?? null;
 
   let services: ServiceRow[] = [];
   let inventory: InventoryRow[] = [];
@@ -133,10 +134,15 @@ export async function getSupabaseDashboardData() {
     return key ? row[key] : undefined;
   };
 
+  // Also scoped to this user's business_id now — previously pulled the
+  // single most recent raw_imports row across ALL users.
   const getRawInventoryRows = async () => {
+    if (!businessId) return [] as InventoryRow[];
+
     const { data: latestRaw, error: rawError } = await client
       .from('raw_imports')
       .select('data')
+      .eq('business_id', businessId)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -199,7 +205,8 @@ export async function getSupabaseDashboardData() {
       inventory = await getRawInventoryRows();
     }
   } else {
-    inventory = await getRawInventoryRows();
+    // No business yet for this user — return empty state, not someone else's data.
+    inventory = [];
   }
 
   const monthKeys = Array.from(
