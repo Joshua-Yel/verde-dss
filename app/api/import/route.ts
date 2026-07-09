@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
+import { createSupabaseRouteClient } from "@/src/lib/supabaseRoute";
 import supabaseServer from '../../../src/lib/supabaseServer'
 
 type ImportedRow = {
@@ -75,7 +75,7 @@ export async function POST(request: Request) {
     }
 
     // Fix 3: resolve the current authenticated user and their business.
-    const supabase = await createRouteHandlerClient({ cookies })
+    const supabase = await createSupabaseRouteClient();
     const {
       data: { user },
     } = await supabase.auth.getUser()
