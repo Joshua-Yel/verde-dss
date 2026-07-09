@@ -22,10 +22,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: authError?.message ?? 'Unable to create account.' }, { status: 400 });
     }
 
-    const { error: profileError } = await supabaseServer.from('businesses').insert({
-      id: authData.user.id,
-      name,
-    });
+    const { error: profileError } = await supabaseServer
+  .from("businesses")
+  .insert({
+    owner_id: authData.user.id,
+    name,
+  });
 
     if (profileError) {
       return NextResponse.json({ error: profileError.message }, { status: 400 });
