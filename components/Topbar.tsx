@@ -24,10 +24,6 @@ export default function Topbar({
   const { toggleAI, setImportOpen, aiOpen } = useUI()
   const router = useRouter();
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    router.push("/login");
-  };
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background">
@@ -83,14 +79,14 @@ export default function Topbar({
           </Button>
 
           {/* Sign Out */}
-          <Button
+          {/* <Button
             variant="outline"
             className="gap-2"
             onClick={handleSignOut}
           >
             <LogOut className="h-4 w-4" />
             Sign Out
-          </Button>
+          </Button> */}
         </div>
       </div>
     </header>

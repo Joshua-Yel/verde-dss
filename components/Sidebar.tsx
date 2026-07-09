@@ -4,9 +4,17 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Button } from './ui/button'
 import { LogOut } from 'lucide-react'
+import { supabase } from "@/src/lib/supabaseClient"
+import { useRouter } from "next/navigation"
+import { useAuth } from '@/app/auth-provider'
+
 
 export default function Sidebar() {
   const pathname = usePathname()
+  const { session } = useAuth()
+  const user = session?.user
+
+
 
   const links = [
     { label: 'Overview', href: '/' },
@@ -15,6 +23,13 @@ export default function Sidebar() {
     { label: 'Financials', href: '/financials' },
     { label: 'Staffing', href: '/staffing' },
   ]
+
+  const router = useRouter();
+    const handleSignOut = async () => {
+      await supabase.auth.signOut();
+      router.push("/login");
+    };
+  
 
   return (
     <aside className="w-64 min-h-screen border-r bg-card flex flex-col">
@@ -61,20 +76,24 @@ export default function Sidebar() {
       <div className="p-6 border-t mt-auto">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white font-semibold">
-            J
+            {user?.email[0]?.toUpperCase()}
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-semibold truncate">josh@example.com</div>
+            <div className="text-sm font-semibold truncate">
+              {user?.email}
+            </div>
             <div className="text-xs text-muted-foreground">Owner</div>
           </div>
         </div>
 
-        <Button 
-          variant="ghost" 
-          className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground"
+         {/* Sign Out */}
+        <Button
+          variant="outline"
+          className="gap-2"
+          onClick={handleSignOut}
         >
-          <LogOut className="w-4 h-4" />
-          Sign out
+          <LogOut className="h-4 w-4" />
+          Sign Out
         </Button>
       </div>
     </aside>
