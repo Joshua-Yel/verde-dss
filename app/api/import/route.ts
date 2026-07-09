@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
-import { createSupabaseRouteClient } from "@/src/lib/supabaseRoute";
+import { randomUUID } from 'crypto'
 import supabaseServer from '../../../src/lib/supabaseServer'
+import { createSupabaseRouteClient } from '../../../src/lib/supabaseRoute'
 
 type ImportedRow = {
   date?: unknown
@@ -65,41 +66,62 @@ function normalizeDate(value: unknown): string | null {
   return parsed.toISOString().slice(0, 10)
 }
 
+// Resolves (or creates) a business owned by the current user.
+// Centralized so every import mode uses the same logic.
+async function resolveBusinessId(
+  ownerId: string,
+  businessName: string | null,
+  filename: string | undefined
+): Promise<{ businessId: string } | { error: NextResponse }> {
+  if (businessName) {
+    const { data: businessData } = await supabaseServer
+      .from('businesses')
+      .select('id')
+      .eq('owner_id', ownerId)
+      .eq('name', businessName)
+      .limit(1)
+    if (businessData && businessData[0]?.id) {
+      return { businessId: businessData[0].id }
+    }
+  }
+
+  const newName = businessName ?? filename ?? 'Imported business'
+  const businessIdCandidate = randomUUID()
+  const insertBusiness = await supabaseServer
+    .from('businesses')
+    .insert({ id: businessIdCandidate, name: newName, owner_id: ownerId })
+    .select('id')
+
+  if (insertBusiness.error || !insertBusiness.data || insertBusiness.data.length === 0) {
+    return {
+      error: NextResponse.json(
+        { error: insertBusiness.error?.message ?? 'Failed to create a business record for this import.' },
+        { status: 500 }
+      ),
+    }
+  }
+
+  return { businessId: insertBusiness.data[0].id }
+}
+
 export async function POST(request: Request) {
   try {
+    // Identify the current user from the session cookie.
+    const routeClient = await createSupabaseRouteClient()
+    const {
+      data: { user },
+    } = await routeClient.auth.getUser()
+
+    if (!user) {
+      return NextResponse.json({ error: 'You must be signed in to import data.' }, { status: 401 })
+    }
+
     const body = await request.json()
     const { filename, mode = 'operations', rows } = body
 
     if (!rows || !Array.isArray(rows)) {
       return NextResponse.json({ error: 'rows must be an array' }, { status: 400 })
     }
-
-    // Fix 3: resolve the current authenticated user and their business.
-    const supabase = await createSupabaseRouteClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    // Fix 1 & 2: the business is always resolved by owner_id, never by name,
-    // and imports never create a new business record.
-    const { data: business, error: businessLookupError } = await supabaseServer
-      .from('businesses')
-      .select('id')
-      .eq('owner_id', user.id)
-      .single()
-
-    if (businessLookupError || !business) {
-      return NextResponse.json(
-        { error: 'No business found for this user. Please set up a business before importing.' },
-        { status: 404 }
-      )
-    }
-
-    const businessId = business.id
 
     if (mode === 'inventory') {
       const invalidRows = (rows as ImportedRow[]).map((row, index) => {
@@ -146,12 +168,16 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Server is not configured for Supabase writes' }, { status: 500 })
       }
 
-      // Fix 4: raw_imports now carries business_id.
+      const businessName = normalizeString((rows as ImportedRow[])[0]?.business_name)
+      const resolved = await resolveBusinessId(user.id, businessName, filename)
+      if ('error' in resolved) return resolved.error
+      const businessId = resolved.businessId
+
       const rawInsert = await supabaseServer.from('raw_imports').insert([
         {
-          business_id: businessId,
           filename: filename || 'upload',
           data: rows,
+          business_id: businessId,
         },
       ])
       if (rawInsert.error) {
@@ -267,12 +293,16 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Server is not configured for Supabase writes' }, { status: 500 })
       }
 
-      // Fix 4: raw_imports now carries business_id.
+      const businessName = normalizeString((rows as ImportedRow[])[0]?.business_name)
+      const resolved = await resolveBusinessId(user.id, businessName, filename)
+      if ('error' in resolved) return resolved.error
+      const businessId = resolved.businessId
+
       const rawInsert = await supabaseServer.from('raw_imports').insert([
         {
-          business_id: businessId,
           filename: filename || 'upload',
           data: rows,
+          business_id: businessId,
         },
       ])
       if (rawInsert.error) {
@@ -317,15 +347,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Server is not configured for Supabase writes' }, { status: 500 })
     }
 
-    // Fix 4: raw_imports now carries business_id.
+    const businessName = mapped[0]?.business_name ?? null
+    const resolved = await resolveBusinessId(user.id, businessName, filename)
+    if ('error' in resolved) return resolved.error
+    const businessId = resolved.businessId
+
     const rawInsert = await supabaseServer.from('raw_imports').insert([
       {
-        business_id: businessId,
         filename: filename || 'upload',
         data: mapped.map(({ rowIndex, ...rest }) => {
           void rowIndex
           return rest
         }),
+        business_id: businessId,
       },
     ])
     if (rawInsert.error) {
