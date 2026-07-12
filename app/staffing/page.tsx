@@ -1,27 +1,68 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import SmallTable from '@/components/SmallTable';
-import { getServicesForecastTable } from '@/lib/data';
+import { StaffingHeatmapSkeleton, TableCardSkeleton } from '@/components/DailyLogSkeleton';
+import { getServicesForecastTable, getWeekdayPatternsData } from '@/lib/data';
 
-export default async function StaffingPage() {
+export const revalidate = 30;
+
+export default function StaffingPage() {
+  return (
+    <div className="space-y-6 mx-auto p-4 md:p-6 text-foreground bg-background transition-colors duration-200">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start border-b border-dashed border-border pb-6">
+        <div className="xl:col-span-1 space-y-1.5">
+          <div className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-primary uppercase">
+            <span className="h-1.5 w-1.5 bg-secondary" />
+            Staffing
+          </div>
+          <h1 className="font-display text-2xl md:text-3xl font-semibold tracking-tight">Staffing &amp; Peak Hours</h1>
+          <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
+            Plan staff coverage around forecasted demand, hour by hour.
+          </p>
+        </div>
+      </div>
+
+      <Suspense
+        fallback={(
+          <div className="space-y-6">
+            <StaffingHeatmapSkeleton />
+            <TableCardSkeleton rows={8} />
+          </div>
+        )}
+      >
+        <StaffingContent />
+      </Suspense>
+    </div>
+  );
+}
+
+async function StaffingContent() {
   const svcTable = await getServicesForecastTable();
+  const weekdayPatterns = await getWeekdayPatternsData();
 
   const totalProjectedVolume = svcTable.reduce((sum, service) => sum + Math.round(service.forecasts[0] || 0), 0);
-  const recommendedStaffing = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day, index) => {
-    const forecastSessions = Math.max(0, Math.round((totalProjectedVolume / 7) * (index === 6 ? 0.2 : index === 5 ? 1.15 : index === 4 ? 0.95 : index === 3 ? 0.8 : index === 2 ? 0.7 : index === 1 ? 0.55 : 0.45)));
-    const demand = forecastSessions > 35 ? "Critical" : forecastSessions > 25 ? "Peak" : forecastSessions > 18 ? "High" : forecastSessions > 10 ? "Medium" : "Low";
-    const recommended = forecastSessions === 0 ? "0 Staff" : `${Math.max(1, Math.round(forecastSessions / 12))} Staff`;
+  const weekdayTotals = weekdayPatterns.filter((entry) => entry.sessions > 0);
+  const fallback = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => {
+    const multiplier = index === 6 ? 0.2 : index === 5 ? 1.15 : index === 4 ? 0.95 : index === 3 ? 0.8 : index === 2 ? 0.7 : index === 1 ? 0.55 : 0.45;
+    return { day, multiplier };
+  });
+  const recommendedStaffing = (weekdayTotals.length >= 7 ? weekdayPatterns : fallback.map((entry) => ({ day: entry.day, sessions: 0, revenue: 0 }))).map((entry, index) => {
+    const forecastSessions = weekdayTotals.length >= 7
+      ? Math.max(0, Math.round(entry.sessions || 0))
+      : Math.max(0, Math.round((totalProjectedVolume / 7) * (fallback[index]?.multiplier ?? 1)));
+    const demand = forecastSessions > 35 ? 'Critical' : forecastSessions > 25 ? 'Peak' : forecastSessions > 18 ? 'High' : forecastSessions > 10 ? 'Medium' : 'Low';
+    const recommended = forecastSessions === 0 ? '0 Staff' : `${Math.max(1, Math.round(forecastSessions / 12))} Staff`;
     const badgeStyle = forecastSessions === 0
-      ? "text-muted-foreground bg-secondary/10 opacity-50"
-      : demand === "Critical"
-        ? "text-destructive bg-destructive/10 border-destructive/20"
-        : demand === "Peak"
-          ? "text-orange-700 dark:text-orange-400 bg-orange-500/10 border-orange-500/20"
-          : demand === "High"
-            ? "text-amber-700 dark:text-amber-400 bg-amber-500/10 border-amber-500/20"
-            : "text-zinc-600 dark:text-zinc-400 bg-zinc-500/10 border-zinc-500/20";
+      ? 'text-muted-foreground bg-secondary/10 opacity-50'
+      : demand === 'Critical'
+        ? 'text-destructive bg-destructive/10 border-destructive/20'
+        : demand === 'Peak'
+          ? 'text-orange-700 dark:text-orange-400 bg-orange-500/10 border-orange-500/20'
+          : demand === 'High'
+            ? 'text-amber-700 dark:text-amber-400 bg-amber-500/10 border-amber-500/20'
+            : 'text-zinc-600 dark:text-zinc-400 bg-zinc-500/10 border-zinc-500/20';
 
     return {
-      day,
+      day: entry.day ?? '',
       forecastSessions,
       demand,
       recommended,
@@ -40,7 +81,7 @@ export default async function StaffingPage() {
   const peakCell = heatmapGrid
     .flatMap((row, dayIdx) => row.map((value, hourIdx) => ({ dayIdx, hourIdx, value })))
     .reduce((best, current) => (current.value > best.value ? current : best), { dayIdx: 0, hourIdx: 0, value: 0 });
-  const dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const peakDayLabel = dayLabels[peakCell.dayIdx] ?? `D${peakCell.dayIdx + 1}`;
   const peakHourLabel = `${peakCell.hourIdx + 9 > 12 ? `${peakCell.hourIdx + 9 - 12} PM` : peakCell.hourIdx + 9 === 12 ? '12 PM' : `${peakCell.hourIdx + 9} AM`}`;
   const averageUtilization = (heatmapValues.reduce((sum, value) => sum + value, 0) / heatmapValues.length / 10) * 100;
@@ -48,111 +89,93 @@ export default async function StaffingPage() {
   const coverageGapHours = `${(heatmapValues.filter((value) => value >= 8).length / 2).toFixed(1)} hrs`;
 
   return (
-    <div className="space-y-6 mx-auto p-4 md:p-6 text-foreground bg-background transition-colors duration-200">
-
-      {/* HEADER */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start border-b border-dashed border-border pb-6">
-        <div className="xl:col-span-1 space-y-1.5">
-          <div className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-primary uppercase">
-            <span className="h-1.5 w-1.5 bg-secondary" />
-            Staffing
-          </div>
-          <h1 className="font-display text-2xl md:text-3xl font-semibold tracking-tight">Staffing &amp; Peak Hours</h1>
-          <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
-            Plan staff coverage around forecasted demand, hour by hour.
-          </p>
-        </div>
-
-        <div className="xl:col-span-2 grid grid-cols-2 md:grid-cols-4 gap-3 w-full">
-          {[
-            {
-              label: "Peak Demand Slot",
-              value: `${peakDayLabel} ${peakHourLabel}`,
-              desc: "Highest traffic hour",
-              icon: (
-                <>
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M12 6v6l4 2" />
-                </>
-              ),
-            },
-            {
-              label: "Avg Utilization",
-              value: `${averageUtilization.toFixed(1)}%`,
-              desc: "Booked capacity",
-              icon: (
-                <>
-                  <path d="m12 14 4-4" />
-                  <path d="M3.34 19a10 10 0 1 1 17.32 0" />
-                </>
-              ),
-            },
-            {
-              label: "Schedule Corrections",
-              value: `${scheduleCorrections} Shifts`,
-              desc: "Under- or over-staffed",
-              icon: (
-                <>
-                  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-                  <circle cx="9" cy="7" r="4" />
-                  <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                </>
-              ),
-            },
-            {
-              label: "Coverage Gaps",
-              value: coverageGapHours,
-              desc: "Understaffed intervals",
-              isDestructive: true,
-              icon: (
-                <>
-                  <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
-                  <path d="M12 9v4" />
-                  <path d="M12 17h.01" />
-                </>
-              ),
-            },
-          ].map((kpi, i) => (
-            <div key={i} className="p-4 rounded-xl border border-border bg-card shadow-xs flex flex-col justify-between group hover:border-primary/30 transition-all duration-200">
-              <div className="flex items-start justify-between gap-2">
-                <span className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">{kpi.label}</span>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width={20}
-                  height={20}
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className={`rounded-md p-1 shrink-0 ${
-                    kpi.isDestructive
-                      ? "bg-destructive/10 text-destructive"
-                      : "bg-primary/10 text-primary"
-                  }`}
-                >
-                  {kpi.icon}
-                </svg>
-              </div>
-              <div className="mt-3">
-                <h3 className={`text-lg md:text-xl font-semibold tracking-tight font-mono ${kpi.isDestructive ? 'text-destructive' : ''}`}>{kpi.value}</h3>
-                <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{kpi.desc}</p>
-              </div>
+    <>
+      <div className="xl:col-span-2 grid grid-cols-2 md:grid-cols-4 gap-3 w-full">
+        {[
+          {
+            label: 'Peak Demand Slot',
+            value: `${peakDayLabel} ${peakHourLabel}`,
+            desc: 'Highest traffic hour',
+            icon: (
+              <>
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 6v6l4 2" />
+              </>
+            ),
+          },
+          {
+            label: 'Avg Utilization',
+            value: `${averageUtilization.toFixed(1)}%`,
+            desc: 'Booked capacity',
+            icon: (
+              <>
+                <path d="m12 14 4-4" />
+                <path d="M3.34 19a10 10 0 1 1 17.32 0" />
+              </>
+            ),
+          },
+          {
+            label: 'Schedule Corrections',
+            value: `${scheduleCorrections} Shifts`,
+            desc: 'Under- or over-staffed',
+            icon: (
+              <>
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </>
+            ),
+          },
+          {
+            label: 'Coverage Gaps',
+            value: coverageGapHours,
+            desc: 'Understaffed intervals',
+            isDestructive: true,
+            icon: (
+              <>
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                <path d="M12 9v4" />
+                <path d="M12 17h.01" />
+              </>
+            ),
+          },
+        ].map((kpi, index) => (
+          <div key={index} className="p-4 rounded-xl border border-border bg-card shadow-xs flex flex-col justify-between group hover:border-primary/30 transition-all duration-200">
+            <div className="flex items-start justify-between gap-2">
+              <span className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">{kpi.label}</span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width={20}
+                height={20}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={`rounded-md p-1 shrink-0 ${
+                  kpi.isDestructive
+                    ? 'bg-destructive/10 text-destructive'
+                    : 'bg-primary/10 text-primary'
+                }`}
+              >
+                {kpi.icon}
+              </svg>
             </div>
-          ))}
-        </div>
+            <div className="mt-3">
+              <h3 className={`text-lg md:text-xl font-semibold tracking-tight font-mono ${kpi.isDestructive ? 'text-destructive' : ''}`}>{kpi.value}</h3>
+              <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{kpi.desc}</p>
+            </div>
+          </div>
+        ))}
       </div>
 
-      {/* HEATMAP — full width, this is the page's hero */}
       <div className="p-5 rounded-xl border border-border bg-card shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-border/40">
           <div>
             <h3 className="text-sm font-semibold text-foreground">Session Volume by Hour</h3>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Mon–Sat, 9:00 AM–8:00 PM.
-            </p>
+            <p className="mt-1 text-[11px] text-muted-foreground">Mon–Sat, 9:00 AM–8:00 PM.</p>
           </div>
 
           <div className="flex items-center gap-1 text-[9px] text-muted-foreground font-mono bg-background/60 p-1.5 rounded-lg border border-border/30 self-start sm:self-center">
@@ -177,7 +200,6 @@ export default async function StaffingPage() {
         </p>
       </div>
 
-      {/* STAFF TABLE + SERVICE MATRIX */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
         <div className="lg:col-span-5 xl:col-span-4 p-5 rounded-xl border border-border bg-card shadow-xs flex flex-col justify-between">
           <div>
@@ -224,8 +246,8 @@ export default async function StaffingPage() {
           </div>
           <div className="overflow-x-auto">
             <SmallTable
-              columns={["Service","Category","Jan","Feb","Mar","Apr","May","F1","F2","F3","MAPE"]}
-              rows={svcTable.map(s => ({
+              columns={["Service", "Category", "Jan", "Feb", "Mar", "Apr", "May", "F1", "F2", "F3", "MAPE"]}
+              rows={svcTable.map((s) => ({
                 Service: <span className="font-medium text-foreground text-xs">{s.service}</span>,
                 Category: <span className="text-muted-foreground text-xs">{s.category}</span>,
                 Jan: <span className="font-mono text-xs text-muted-foreground/80">{s.actuals[0]}</span>,
@@ -233,17 +255,16 @@ export default async function StaffingPage() {
                 Mar: <span className="font-mono text-xs text-muted-foreground/80">{s.actuals[2]}</span>,
                 Apr: <span className="font-mono text-xs text-muted-foreground/80">{s.actuals[3]}</span>,
                 May: <span className="font-mono text-xs text-muted-foreground/80">{s.actuals[4]}</span>,
-                F1: <span className="font-mono font-bold text-xs text-primary">{Math.round(s.forecasts[0]||0)}</span>,
-                F2: <span className="font-mono font-medium text-xs text-foreground/80">{Math.round(s.forecasts[1]||0)}</span>,
-                F3: <span className="font-mono text-xs text-muted-foreground">{Math.round(s.forecasts[2]||0)}</span>,
-                MAPE: <span className={`font-mono text-[11px] font-semibold px-1.5 py-0.5 rounded ${Number.parseFloat(s.mape) < 10 ? '' : 'bg-zinc-500/10 text-muted-foreground'}`} style={Number.parseFloat(s.mape) < 10 ? { backgroundColor: 'hsl(var(--success) / 0.1)', color: 'hsl(var(--success))' } : undefined}>{s.mape}%</span>
+                F1: <span className="font-mono font-bold text-xs text-primary">{Math.round(s.forecasts[0] || 0)}</span>,
+                F2: <span className="font-mono font-medium text-xs text-foreground/80">{Math.round(s.forecasts[1] || 0)}</span>,
+                F3: <span className="font-mono text-xs text-muted-foreground">{Math.round(s.forecasts[2] || 0)}</span>,
+                MAPE: <span className={`font-mono text-[11px] font-semibold px-1.5 py-0.5 rounded ${Number.parseFloat(s.mape) < 10 ? '' : 'bg-zinc-500/10 text-muted-foreground'}`} style={Number.parseFloat(s.mape) < 10 ? { backgroundColor: 'hsl(var(--success) / 0.1)', color: 'hsl(var(--success))' } : undefined}>{s.mape}%</span>,
               }))}
             />
           </div>
         </div>
       </div>
-
-    </div>
+    </>
   );
 }
 

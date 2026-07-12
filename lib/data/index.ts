@@ -1,12 +1,19 @@
 import { cache } from 'react'
 import { redirect } from 'next/navigation'
-import { getSupabaseDashboardData } from './supabase'
 import { createSupabaseRouteClient } from '@/src/lib/supabaseRoute'
+import {
+  getSupabaseDashboardData,
+  getWeekdayPatterns,
+  getServiceByWeekday,
+  getExpenseCategoryBreakdown,
+  getInventoryConsumptionSignal,
+} from './supabase'
 
-// Resolves the current logged-in user's id once per request.
-// `cache()` dedupes this across the 10 functions below, so a single
-// page render (which may call several of these) only hits Supabase
-// auth once, not ten times.
+interface DashboardDataOptions {
+  businessId?: string | null
+  userId?: string | null
+}
+
 const getCurrentUserId = cache(async (): Promise<string> => {
   const client = await createSupabaseRouteClient()
   const {
@@ -14,74 +21,97 @@ const getCurrentUserId = cache(async (): Promise<string> => {
   } = await client.auth.getUser()
 
   if (!user) {
-    // Server Components can't return a 401 body the way an API route can —
-    // redirecting to login is the correct behavior here.
     redirect('/login')
   }
 
   return user.id
 })
 
-export async function getMonths() {
-  const userId = await getCurrentUserId()
-  const data = await getSupabaseDashboardData(userId)
+export async function getMonths(options?: DashboardDataOptions) {
+  const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
+  const data = await getSupabaseDashboardData(userId ?? '', { businessId: options?.businessId })
   return data.months
 }
 
-export async function getRevenueSeries() {
-  const userId = await getCurrentUserId()
-  const data = await getSupabaseDashboardData(userId)
+export async function getRevenueSeries(options?: DashboardDataOptions) {
+  const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
+  const data = await getSupabaseDashboardData(userId ?? '', { businessId: options?.businessId })
   return data.revenueSeries
 }
 
-export async function getKPIsOverview() {
-  const userId = await getCurrentUserId()
-  const data = await getSupabaseDashboardData(userId)
+export async function getKPIsOverview(options?: DashboardDataOptions) {
+  const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
+  const data = await getSupabaseDashboardData(userId ?? '', { businessId: options?.businessId })
   return data.kpis
 }
 
-export async function getTopServices(limit = 5) {
-  const userId = await getCurrentUserId()
-  const data = await getSupabaseDashboardData(userId)
+export async function getTopServices(limit = 5, options?: DashboardDataOptions) {
+  const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
+  const data = await getSupabaseDashboardData(userId ?? '', { businessId: options?.businessId })
   return data.topServices.slice(0, limit)
 }
 
-export async function getRestockList() {
-  const userId = await getCurrentUserId()
-  const data = await getSupabaseDashboardData(userId)
+export async function getRestockList(options?: DashboardDataOptions) {
+  const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
+  const data = await getSupabaseDashboardData(userId ?? '', { businessId: options?.businessId })
   return data.restockList
 }
 
-export async function getServicesForecastTable() {
-  const userId = await getCurrentUserId()
-  const data = await getSupabaseDashboardData(userId)
+export async function getServicesForecastTable(options?: DashboardDataOptions) {
+  const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
+  const data = await getSupabaseDashboardData(userId ?? '', { businessId: options?.businessId })
   return data.serviceForecasts
 }
 
-export async function getInventoryItems() {
-  const userId = await getCurrentUserId()
-  const data = await getSupabaseDashboardData(userId)
+export async function getInventoryItems(options?: DashboardDataOptions) {
+  const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
+  const data = await getSupabaseDashboardData(userId ?? '', { businessId: options?.businessId })
   return data.inventoryItems
 }
 
-export async function getFinancialSummary() {
-  const userId = await getCurrentUserId()
-  const data = await getSupabaseDashboardData(userId)
+export async function getFinancialSummary(options?: DashboardDataOptions) {
+  const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
+  const data = await getSupabaseDashboardData(userId ?? '', { businessId: options?.businessId })
   return {
     revenueSeries: data.revenueSeries ?? [],
     expenseSeries: data.expenseSeries ?? [],
     netIncomeSeries: data.netIncomeSeries ?? [],
+    periodLabels: data.periodLabels ?? [],
+    expenseBreakdown: data.expenseBreakdown ?? [],
+    forecastMethodUsed: data.forecastMethodUsed ?? 'WMA',
+    confidenceBand: data.confidenceBand ?? null,
+    dataAvailability: data.dataAvailability ?? null,
   }
 }
 
-export async function getExpenseSeries() {
-  const userId = await getCurrentUserId()
-  const data = await getSupabaseDashboardData(userId)
+export async function getExpenseSeries(options?: DashboardDataOptions) {
+  const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
+  const data = await getSupabaseDashboardData(userId ?? '', { businessId: options?.businessId })
   return data.expenseSeries ?? []
 }
 
-export async function getDailyLog() {
-  const userId = await getCurrentUserId()
-  const data = await getSupabaseDashboardData(userId)
+export async function getDailyLog(options?: DashboardDataOptions) {
+  const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
+  const data = await getSupabaseDashboardData(userId ?? '', { businessId: options?.businessId })
   return data.dailyLog ?? []
+}
+
+export async function getWeekdayPatternsData(options?: DashboardDataOptions) {
+  const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
+  return getWeekdayPatterns(userId ?? '', { businessId: options?.businessId })
+}
+
+export async function getServiceByWeekdayData(options?: DashboardDataOptions) {
+  const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
+  return getServiceByWeekday(userId ?? '', { businessId: options?.businessId })
+}
+
+export async function getExpenseCategoryBreakdownData(options?: DashboardDataOptions) {
+  const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
+  return getExpenseCategoryBreakdown(userId ?? '', { businessId: options?.businessId })
+}
+
+export async function getInventoryConsumptionSignalData(options?: DashboardDataOptions) {
+  const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
+  return getInventoryConsumptionSignal(userId ?? '', { businessId: options?.businessId })
 }

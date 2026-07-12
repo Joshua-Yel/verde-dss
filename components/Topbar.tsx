@@ -1,9 +1,7 @@
 "use client"
 
 import React from "react"
-import { Calendar, Upload, Download, LogOut } from "lucide-react"
-import { supabase } from "@/src/lib/supabaseClient"
-import { useRouter } from "next/navigation"
+import { Calendar, Upload, Download, Menu } from "lucide-react"
 
 import { useUI } from "./UIContext"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -16,23 +14,41 @@ import {
 
 import { cn } from "@/lib/utils"
 
+type TopbarProps = {
+  title?: string
+  onMenuClick?: () => void
+}
+
 export default function Topbar({
   title = "Dashboard",
-}: {
-  title?: string
-}) {
+  onMenuClick,
+}: TopbarProps) {
   const { toggleAI, setImportOpen, aiOpen } = useUI()
-  const router = useRouter();
-
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-background">
-      <div className="mx-auto flex max-w-screen-1xl items-center justify-between px-8 py-4">
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-
+    <header className="sticky top-0 z-30 w-full border-b bg-background">
+      <div className="mx-auto flex h-16 items-center justify-between px-4 md:px-8">
+        {/* Left */}
         <div className="flex items-center gap-3">
-          {/* Date */}
-          <div className="flex items-center gap-2 rounded-full border bg-card px-5 py-2.5 text-sm text-muted-foreground">
+          {/* Mobile Hamburger */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="md:hidden"
+            onClick={onMenuClick}
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
+
+          <h1 className="text-xl md:text-2xl font-semibold tracking-tight">
+            {title}
+          </h1>
+        </div>
+
+        {/* Right */}
+        <div className="flex items-center gap-2 md:gap-3">
+          {/* Hide date on small screens */}
+          <div className="hidden lg:flex items-center gap-2 rounded-full border bg-card px-5 py-2.5 text-sm text-muted-foreground">
             <Calendar className="h-4 w-4" />
             Jan 01 — May 31, 2025
           </div>
@@ -40,7 +56,7 @@ export default function Topbar({
           {/* Import */}
           <Button
             variant="outline"
-            className="gap-2"
+            className="hidden sm:flex gap-2"
             onClick={() => setImportOpen(true)}
           >
             <Upload className="h-4 w-4" />
@@ -52,7 +68,7 @@ export default function Topbar({
             <DropdownMenuTrigger
               className={cn(
                 buttonVariants({ variant: "outline" }),
-                "gap-2"
+                "hidden sm:flex gap-2"
               )}
             >
               <Download className="h-4 w-4" />
@@ -73,20 +89,10 @@ export default function Topbar({
           {/* AI */}
           <Button
             onClick={toggleAI}
-            className="gap-2 bg-[#4A5F4A] font-medium text-white hover:bg-[#3F5240]"
+            className="bg-[#4A5F4A] text-white hover:bg-[#3F5240]"
           >
             {aiOpen ? "Close ARIA" : "Open ARIA"}
           </Button>
-
-          {/* Sign Out */}
-          {/* <Button
-            variant="outline"
-            className="gap-2"
-            onClick={handleSignOut}
-          >
-            <LogOut className="h-4 w-4" />
-            Sign Out
-          </Button> */}
         </div>
       </div>
     </header>
@@ -94,7 +100,9 @@ export default function Topbar({
 }
 
 function handleExport(type: "pdf" | "excel") {
-  const filename = `VERDE_Report_${new Date().toISOString().slice(0, 10)}`
+  const filename = `VERDE_Report_${new Date()
+    .toISOString()
+    .slice(0, 10)}`
   const ext = type === "pdf" ? "pdf" : "xlsx"
 
   const blob = new Blob([`Mock ${type.toUpperCase()} export from VERDE`], {
@@ -109,6 +117,7 @@ function handleExport(type: "pdf" | "excel") {
   const a = document.createElement("a")
   a.href = url
   a.download = `${filename}.${ext}`
+
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)

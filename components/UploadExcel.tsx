@@ -44,6 +44,7 @@ type OperationsMappedRow = {
   category?: string | null;
   price?: number | null;
   time_of_day?: string | null;
+  visit_id?: string | null;
   notes?: string | null;
   business_name?: string | null;
   raw: Row;
@@ -142,6 +143,22 @@ const normalizeMonth = (value: unknown): string | null => {
   return `${parsed.getFullYear()}-${month}`;
 };
 
+const EXPENSE_CATEGORIES = ['Payroll', 'Rent', 'Utilities', 'Supplies', 'Marketing', 'Admin', 'Other'] as const;
+
+const normalizeExpenseCategory = (value: unknown): string => {
+  const text = normalizeText(value).trim().toLowerCase();
+  if (!text) return 'Other';
+  const exact = EXPENSE_CATEGORIES.find((category) => category.toLowerCase() === text);
+  if (exact) return exact;
+  if (['payroll', 'staff', 'employee', 'salary'].some((alias) => text.includes(alias))) return 'Payroll';
+  if (['rent', 'lease'].some((alias) => text.includes(alias))) return 'Rent';
+  if (['utilities', 'electric', 'water', 'internet', 'phone'].some((alias) => text.includes(alias))) return 'Utilities';
+  if (['supplies', 'inventory', 'stock'].some((alias) => text.includes(alias))) return 'Supplies';
+  if (['marketing', 'advertising', 'promo'].some((alias) => text.includes(alias))) return 'Marketing';
+  if (['admin', 'office', 'software', 'fees'].some((alias) => text.includes(alias))) return 'Admin';
+  return 'Other';
+};
+
 export default function UploadExcel() {
   const [step, setStep] = useState<Step>('upload');
   const [parsed, setParsed] = useState<Row[] | null>(null);
@@ -165,6 +182,7 @@ export default function UploadExcel() {
   const [categoryKey, setCategoryKey] = useState<string | null>(null);
   const [priceKey, setPriceKey] = useState<string | null>(null);
   const [timeOfDayKey, setTimeOfDayKey] = useState<string | null>(null);
+  const [visitIdKey, setVisitIdKey] = useState<string | null>(null);
   const [amountKey, setAmountKey] = useState<string | null>(null);
 
   const [productKey, setProductKey] = useState<string | null>(null);
@@ -202,7 +220,7 @@ export default function UploadExcel() {
 
   const resetMapping = () => {
     setDateKey(null); setServiceKey(null); setQtyKey(null); setRevKey(null);
-    setCategoryKey(null); setPriceKey(null); setTimeOfDayKey(null);
+    setCategoryKey(null); setPriceKey(null); setTimeOfDayKey(null); setVisitIdKey(null);
     setAmountKey(null);
     setProductKey(null); setUnitKey(null); setMonthKey(null);
     setOpeningKey(null); setPurchasedKey(null); setUsedKey(null);
@@ -241,6 +259,7 @@ export default function UploadExcel() {
       setCategoryKey(detectDefault(newColumns, ['category', 'service category']));
       setPriceKey(detectDefault(newColumns, ['unit price', 'price', 'rate']));
       setTimeOfDayKey(detectDefault(newColumns, ['time of day', 'time', 'session time']));
+      setVisitIdKey(detectDefault(newColumns, ['visit id', 'visit_id', 'appointment id', 'appointment_id']));
       setNotesKey(detectDefault(newColumns, ['notes', 'remarks', 'comments']));
       setBusinessKey(detectDefault(newColumns, ['business name', 'business', 'tenant', 'company']));
     }
@@ -334,6 +353,7 @@ export default function UploadExcel() {
         { id: 'category', label: 'Category', value: categoryKey, set: setCategoryKey },
         { id: 'price', label: 'Unit Price (PHP)', value: priceKey, set: setPriceKey },
         { id: 'time_of_day', label: 'Time of Day', value: timeOfDayKey, set: setTimeOfDayKey },
+        { id: 'visit_id', label: 'Visit ID', value: visitIdKey, set: setVisitIdKey },
         { id: 'business', label: 'Business Name', value: businessKey, set: setBusinessKey },
         { id: 'notes', label: 'Notes', value: notesKey, set: setNotesKey },
       ];
@@ -367,7 +387,7 @@ export default function UploadExcel() {
           service_name: categoryKey ? normalizeText(r[categoryKey]) : '',
           quantity: amountKey ? normalizeNumber(r[amountKey]) : null,
           revenue: null,
-          category: categoryKey ? normalizeText(r[categoryKey]) : null,
+          category: categoryKey ? normalizeExpenseCategory(r[categoryKey]) : null,
           price: amountKey ? normalizeNumber(r[amountKey]) : null,
           time_of_day: null,
           notes: notesKey ? normalizeText(r[notesKey]) : null,
@@ -383,6 +403,7 @@ export default function UploadExcel() {
         category: categoryKey ? normalizeText(r[categoryKey]) : null,
         price: priceKey ? normalizeNumber(r[priceKey]) : null,
         time_of_day: timeOfDayKey ? normalizeText(r[timeOfDayKey]) : null,
+        visit_id: visitIdKey ? normalizeText(r[visitIdKey]) : null,
         notes: notesKey ? normalizeText(r[notesKey]) : null,
         business_name: businessKey ? normalizeText(r[businessKey]) : null,
         raw: r,
@@ -390,7 +411,7 @@ export default function UploadExcel() {
     });
   }, [
     parsed, importMode,
-    dateKey, serviceKey, qtyKey, revKey, categoryKey, priceKey, timeOfDayKey,
+    dateKey, serviceKey, qtyKey, revKey, categoryKey, priceKey, timeOfDayKey, visitIdKey,
     amountKey,
     productKey, unitKey, monthKey, openingKey, purchasedKey, usedKey, closingKey, supplierKey, reorderPointKey, unitCostKey, statusKey, notesKey, businessKey,
   ]);
@@ -513,6 +534,9 @@ export default function UploadExcel() {
             <div className="rounded-lg border bg-muted/20 p-3 text-sm">
               <p className="font-medium text-foreground">
                 {importMode === 'operations' ? 'Expected template columns' : 'Expected template columns'}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {importMode === 'expenses' ? 'Allowed expense categories are Payroll, Rent, Utilities, Supplies, Marketing, Admin, and Other.' : null}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {importMode === 'operations'

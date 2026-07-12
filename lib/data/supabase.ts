@@ -1,83 +1,132 @@
-import { supabaseServer } from '@/src/lib/supabaseServer';
-import { forecastSeries, wma } from '../forecast/wma';
+import { unstable_cache } from 'next/cache'
+import { supabaseServer } from '@/src/lib/supabaseServer'
+import { forecastSeries, wma } from '../forecast/wma'
+import { bucketLabelForDate, resolveDateRange } from '@/lib/dateRange'
 
 interface ServiceRow {
-  id: number;
-  name: string;
-  category: string;
-  price: number;
+  id: number
+  name: string
+  category: string
+  price: number
 }
 
 interface InventoryRow {
-  name: string;
-  supplier: string;
-  stock: number;
-  reorder_point: number;
-  unit_cost: number;
+  name: string
+  supplier: string | null
+  stock: number | null
+  reorder_point: number | null
+  unit_cost: number | null
+  status?: string | null
+  month?: string | null
+  used?: number | null
+  closing_stock?: number | null
+  opening_stock?: number | null
+  purchased?: number | null
 }
 
 interface OperationRow {
-  date: string;
-  quantity: number | null;
-  revenue: number | null;
-  service_id: number | null;
+  date: string
+  quantity: number | null
+  revenue: number | null
+  service_id: number | null
 }
 
 function normalizeString(value: unknown): string | null {
-  if (value === undefined || value === null) return null;
-  const str = String(value).trim();
-  return str === '' ? null : str;
+  if (value === undefined || value === null) return null
+  const str = String(value).trim()
+  return str === '' ? null : str
 }
 
 function normalizeNumber(value: unknown): number | null {
-  if (value === undefined || value === null || value === '') return null;
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  const cleaned = String(value).replace(/[₱,$]/g, '').replace(/,/g, '').trim();
-  if (!cleaned) return null;
-  const parsed = Number(cleaned);
-  return Number.isFinite(parsed) ? parsed : null;
+  if (value === undefined || value === null || value === '') return null
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  const cleaned = String(value).replace(/[₱,$]/g, '').replace(/,/g, '').trim()
+  if (!cleaned) return null
+  const parsed = Number(cleaned)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
-function toMonthKey(value?: string | null) {
-  if (!value) return null;
-  const trimmed = value.slice(0, 7);
-  return trimmed.length === 7 ? trimmed : null;
-}
-
-function buildMonthLabels(months: string[]) {
-  return months.slice(-5);
-}
-
-function buildSeriesFromOperations(rows: OperationRow[], monthLabels: string[]) {
-  const monthMap = new Map<string, number>();
-
+function buildSeriesFromBuckets(rows: Array<{ date: string; value: number }>, labels: string[], granularity: 'daily' | 'weekly' | 'monthly') {
+  const bucketMap = new Map<string, number>()
   for (const row of rows) {
-    const monthKey = toMonthKey(row.date);
-    if (!monthKey) continue;
-    const current = monthMap.get(monthKey) ?? 0;
-    monthMap.set(monthKey, current + Number(row.revenue ?? 0));
+    const bucket = bucketLabelForDate(row.date, granularity)
+    if (!bucket) continue
+    const current = bucketMap.get(bucket) ?? 0
+    bucketMap.set(bucket, current + row.value)
   }
-
-  return monthLabels.map((month) => monthMap.get(month) ?? 0);
+  return labels.map((label) => bucketMap.get(label) ?? 0)
 }
 
-// IMPORTANT: userId is required. This function must only ever return data
-// belonging to the given user's own business — never "any" business found
-// in the tables. supabaseServer uses the service-role key, which bypasses
-// RLS entirely, so scoping happens here in application code, not the DB.
-export async function getSupabaseDashboardData(userId: string) {
-  const client = supabaseServer as any;
+function buildSeriesFromOperations(rows: OperationRow[], labels: string[], granularity: 'daily' | 'weekly' | 'monthly') {
+  return buildSeriesFromBuckets(
+    rows
+      .filter((row) => row.date)
+      .map((row) => ({ date: row.date, value: Number(row.revenue ?? 0) })),
+    labels,
+    granularity
+  )
+}
 
-  if (!userId) {
-    throw new Error('getSupabaseDashboardData requires a userId — refusing to load unscoped data.');
+function getDaysInMonth(month: string | null | undefined) {
+  if (!month) return 30
+  const [year, mon] = month.split('-').map((value) => Number(value))
+  if (!year || !mon) return 30
+  return new Date(year, mon, 0).getDate()
+}
+
+type RawRow = Record<string, unknown>
+
+interface DashboardDataOptions {
+  businessId?: string | null
+  client?: any
+}
+
+async function getRawRows(client: typeof supabaseServer, businessId: string | null, candidateKeys: string[]) {
+  if (!businessId) return [] as RawRow[]
+  const { data } = await client
+    .from('raw_imports')
+    .select('data')
+    .eq('business_id', businessId)
+    .order('created_at', { ascending: false })
+
+  if (!data) return [] as RawRow[]
+  const rows: RawRow[] = []
+  for (const importPayload of data) {
+    if (!Array.isArray(importPayload?.data)) continue
+    for (const row of importPayload.data) {
+      const isCandidate = candidateKeys.some((candidate) => Object.keys(row ?? {}).some((key) => key.toLowerCase().includes(candidate.toLowerCase())))
+      if (isCandidate) rows.push(row)
+    }
+  }
+  return rows
+}
+
+async function resolveBusinessId(client: any, userId: string | null | undefined) {
+  if (!userId) return null
+
+  const { data: businesses } = await client
+    .from('businesses')
+    .select('id')
+    .eq('owner_id', userId)
+    .limit(1)
+
+  return businesses?.[0]?.id ?? null
+}
+
+const getDashboardDataForUser = async (userId: string, options?: DashboardDataOptions) => {
+  const client = options?.client ?? supabaseServer
+
+  if (!userId && !options?.businessId) {
+    throw new Error('getSupabaseDashboardData requires a userId or businessId — refusing to load unscoped data.')
   }
 
   if (!client || typeof client.from !== 'function') {
     return {
-      months: ['2025-01', '2025-02', '2025-03', '2025-04', '2025-05'],
-      revenueSeries: [0, 0, 0, 0, 0],
-      expenseSeries: [0, 0, 0, 0, 0],
-      netIncomeSeries: [0, 0, 0, 0, 0],
+      months: [],
+      periodLabels: [],
+      revenueSeries: [],
+      expenseSeries: [],
+      netIncomeSeries: [],
       inventoryItems: [],
       kpis: {
         projectedRevenue: 0,
@@ -90,180 +139,159 @@ export async function getSupabaseDashboardData(userId: string) {
       restockList: [],
       serviceForecasts: [],
       dailyLog: [],
-    };
+      expenseBreakdown: [],
+      forecastMethodUsed: 'WMA',
+      confidenceBand: null,
+      dataAvailability: {
+        timeOfDayFillRate: 0,
+        inventoryHasReorderPoints: false,
+        inventoryHasUnitCost: false,
+        dateRangeMonths: 0,
+        expenseCategoriesTracked: [],
+      },
+    }
   }
 
-  // Resolve the business belonging to THIS user only. We do NOT fall back to
-  // scanning inventory_items/services/daily_operations for "any" business_id —
-  // that was the bug: it silently returned whichever row was first in the
-  // table, regardless of who was logged in.
-  const { data: businesses } = await client
-    .from('businesses')
-    .select('id,name')
-    .eq('owner_id', userId)
-    .limit(1);
+  const businessId = options?.businessId ?? await resolveBusinessId(client, userId)
 
-  const businessId = businesses?.[0]?.id ?? null;
-
-  let services: ServiceRow[] = [];
-  let inventory: InventoryRow[] = [];
-  let operations: OperationRow[] = [];
-
-  const findRawKey = (row: any, candidates: string[]) => {
-    if (!row || typeof row !== 'object') return null;
-    const keys = Object.keys(row);
-    const lowerKeys = keys.map((key) => key.toLowerCase());
-
-    for (const candidate of candidates) {
-      const exactIndex = lowerKeys.indexOf(candidate.toLowerCase());
-      if (exactIndex !== -1) return keys[exactIndex];
-    }
-
-    for (const key of keys) {
-      const lowerKey = key.toLowerCase();
-      if (candidates.some((candidate) => lowerKey.includes(candidate.toLowerCase()))) {
-        return key;
-      }
-    }
-
-    return null;
-  };
-
-  const getRawValue = (row: any, candidates: string[]) => {
-    const key = findRawKey(row, candidates);
-    return key ? row[key] : undefined;
-  };
-
-  // Also scoped to this user's business_id now — previously pulled the
-  // single most recent raw_imports row across ALL users.
-  const getRawInventoryRows = async () => {
-    if (!businessId) return [] as InventoryRow[];
-
-    const { data: latestRaw, error: rawError } = await client
-      .from('raw_imports')
-      .select('data')
-      .eq('business_id', businessId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (rawError || !latestRaw || !Array.isArray(latestRaw.data)) return [] as InventoryRow[];
-
-    return (latestRaw.data as any[])
-      .map((row) => {
-        const name = normalizeString(getRawValue(row, ['product_name', 'product name', 'product', 'item', 'inventory item']));
-        if (!name) return null;
-
-        const supplier = normalizeString(getRawValue(row, ['supplier', 'vendor', 'source']));
-        const stock = normalizeNumber(getRawValue(row, ['closing_stock', 'closing stock', 'closing', 'closing_stock', 'stock on hand', 'stock'])) ?? 0;
-        const reorder_point = normalizeNumber(getRawValue(row, ['reorder_point', 'reorder point', 'rp', 'reorder'])) ?? 0;
-        const unit_cost = normalizeNumber(getRawValue(row, ['unit_cost', 'unit cost', 'cost', 'price', 'unit price'])) ?? 0;
-
-        return {
-          name,
-          supplier,
-          stock,
-          reorder_point,
-          unit_cost,
-        } as InventoryRow;
-      })
-      .filter((item): item is InventoryRow => item !== null);
-  };
+  let services: ServiceRow[] = []
+  let inventory: InventoryRow[] = []
+  let operations: OperationRow[] = []
 
   if (businessId) {
     const inventoryQuery = client
       .from('inventory_items')
       .select('name,supplier,stock,reorder_point,unit_cost')
       .eq('business_id', businessId)
-      .order('name');
+      .order('name')
     const serviceQuery = client
       .from('services')
       .select('id,name,category,price')
       .eq('business_id', businessId)
-      .order('name');
+      .order('name')
     const operationQuery = client
       .from('daily_operations')
       .select('date,quantity,revenue,service_id')
       .eq('business_id', businessId)
-      .order('date');
+      .order('date')
 
     const [{ data: serviceRows }, inventoryResult, { data: operationRows }] = await Promise.all([
       serviceQuery,
       inventoryQuery,
       operationQuery,
-    ]);
+    ])
 
-    services = (serviceRows ?? []) as ServiceRow[];
+    services = (serviceRows ?? []) as unknown as ServiceRow[]
+    operations = (operationRows ?? []) as unknown as OperationRow[]
 
-    if (!inventoryResult.error) {
-      inventory = (inventoryResult.data ?? []) as InventoryRow[];
+    if (inventoryResult && 'data' in inventoryResult) {
+      inventory = (inventoryResult.data ?? []) as unknown as InventoryRow[]
     }
-
-    operations = (operationRows ?? []) as OperationRow[];
-
-    if (inventoryResult.error || inventory.length === 0) {
-      inventory = await getRawInventoryRows();
-    }
-  } else {
-    // No business yet for this user — return empty state, not someone else's data.
-    inventory = [];
   }
 
-  const monthKeys = Array.from(
-    new Set(
-      operations
-        .map((row) => toMonthKey(row.date))
-        .filter((value): value is string => Boolean(value))
-    )
-  ).sort();
+  const rawInventoryRows = await getRawRows(client, businessId, ['product_name', 'product', 'closing_stock', 'opening_stock', 'used'])
+  const rawExpenseRows = await getRawRows(client, businessId, ['amount', 'category'])
 
-  const months = buildMonthLabels(monthKeys);
-  const revenueSeries = buildSeriesFromOperations(
-    operations.filter((row) => toMonthKey(row.date) && months.includes(toMonthKey(row.date)!)),
-    months
-  );
+  const inventoryFromRaw = rawInventoryRows
+    .map((row: RawRow) => {
+      const name = normalizeString(row?.product_name ?? row?.['Product Name'] ?? row?.product ?? row?.name)
+      if (!name) return null
+      const month = normalizeString(row?.month ?? row?.['Month'])
+      const opening_stock = normalizeNumber(row?.opening_stock ?? row?.['Opening Stock'] ?? row?.opening)
+      const purchased = normalizeNumber(row?.purchased ?? row?.['Purchased'] ?? row?.purchase)
+      const used = normalizeNumber(row?.used ?? row?.['Used'] ?? row?.consumed)
+      const closing_stock = normalizeNumber(row?.closing_stock ?? row?.['Closing Stock'] ?? row?.closing)
+      const status = normalizeString(row?.status ?? row?.['Status'])
+      const supplier = normalizeString(row?.supplier ?? row?.['Supplier'])
+      const reorder_point = normalizeNumber(row?.reorder_point ?? row?.['Reorder Point'] ?? row?.rp)
+      const unit_cost = normalizeNumber(row?.unit_cost ?? row?.['Unit Cost'] ?? row?.cost)
+      return {
+        name,
+        month,
+        opening_stock: opening_stock ?? 0,
+        purchased: purchased ?? 0,
+        used: used ?? 0,
+        closing_stock: closing_stock ?? 0,
+        supplier: supplier ?? '',
+        reorder_point: reorder_point ?? 0,
+        unit_cost: unit_cost ?? 0,
+        status,
+      } as InventoryRow
+    })
+    .filter((item): item is InventoryRow => item !== null)
 
-  const serviceSeries = new Map<number, number[]>();
-  const serviceTotals = new Map<number, Map<string, number>>();
+  if (inventoryFromRaw.length > 0) {
+    inventory = inventoryFromRaw.map((item) => ({
+      ...item,
+      stock: item.closing_stock ?? 0,
+      reorder_point: item.reorder_point ?? 0,
+      unit_cost: item.unit_cost ?? 0,
+      supplier: item.supplier ?? '',
+    })) as InventoryRow[]
+  }
+
+  const expenseRows = rawExpenseRows
+    .map((row: RawRow) => {
+      const date = normalizeString(row?.date ?? row?.['Date'])
+      const category = normalizeString(row?.category ?? row?.['Category'])
+      const amount = normalizeNumber(row?.amount ?? row?.['Amount (PHP)'] ?? row?.['Amount'])
+      if (!date || !category || amount === null) return null
+      return { date, category, amount }
+    })
+    .filter((row): row is { date: string; category: string; amount: number } => Boolean(row))
+
+  const serviceMap = new Map<number, ServiceRow>(services.map((service) => [service.id, service]))
+  const dates = operations.map((row) => row.date).concat(expenseRows.map((row) => row.date))
+  const range = resolveDateRange(dates)
+  const granularity = range.granularity
+  const labels = range.labels
+  const months = labels
+
+  const revenueSeries = buildSeriesFromOperations(operations, labels, granularity)
+  const expenseSeries = expenseRows.length > 0
+    ? buildSeriesFromBuckets(expenseRows.map((row) => ({ date: row.date, value: row.amount })), labels, granularity)
+    : labels.map(() => 0)
+  const netIncomeSeries = revenueSeries.map((value, index) => value - (expenseSeries[index] ?? 0))
+
+  const serviceSeries = new Map<number, number[]>()
+  const serviceTotals = new Map<number, Map<string, number>>()
 
   for (const row of operations) {
-    const monthKey = toMonthKey(row.date);
-    if (!monthKey || !row.service_id) continue;
-
+    const bucket = bucketLabelForDate(row.date, granularity)
+    if (!bucket || !row.service_id) continue
     if (!serviceTotals.has(row.service_id)) {
-      serviceTotals.set(row.service_id, new Map());
+      serviceTotals.set(row.service_id, new Map())
     }
-
-    const totals = serviceTotals.get(row.service_id)!;
-    totals.set(monthKey, (totals.get(monthKey) ?? 0) + Number(row.quantity ?? 0));
+    const totals = serviceTotals.get(row.service_id)!
+    totals.set(bucket, (totals.get(bucket) ?? 0) + Number(row.quantity ?? 0))
   }
 
   for (const service of services) {
-    const totals = serviceTotals.get(service.id) ?? new Map<string, number>();
-    const values = months.map((month) => totals.get(month) ?? 0);
-    serviceSeries.set(service.id, values);
+    const totals = serviceTotals.get(service.id) ?? new Map<string, number>()
+    const values = labels.map((label) => totals.get(label) ?? 0)
+    serviceSeries.set(service.id, values)
   }
 
   const serviceForecasts = services.map((service) => {
-    const actuals = serviceSeries.get(service.id) ?? [];
-    const forecasts = forecastSeries(actuals, 3, 3);
-    const lastActual = actuals[actuals.length - 1] ?? 0;
-    const pred = wma(actuals.slice(-3));
-    const mape = lastActual > 0 ? Math.round(Math.abs((lastActual - pred) / lastActual) * 1000) / 10 : 0;
-
+    const actuals = serviceSeries.get(service.id) ?? []
+    const forecastValues = forecastSeries(actuals, 3, Math.min(3, actuals.length))
+    const lastActual = actuals[actuals.length - 1] ?? 0
+    const pred = wma(actuals.slice(-3))
+    const mape = lastActual > 0 ? Math.round(Math.abs((lastActual - pred) / lastActual) * 1000) / 10 : 0
     return {
       service: service.name,
       category: service.category,
       actuals,
-      forecasts,
+      forecasts: forecastValues,
       mape: `${mape}%`,
       bookings: lastActual,
-    };
-  });
+      forecastMethodUsed: actuals.length >= 3 ? 'WMA (3-point)' : 'WMA (available history)',
+    }
+  })
 
-  const forecastNext = forecastSeries(revenueSeries, 1, 3)[0] ?? 0;
-  const lastRevenue = revenueSeries[revenueSeries.length - 1] ?? 0;
-  const projectedPct = lastRevenue > 0 ? ((forecastNext - lastRevenue) / lastRevenue) * 100 : 0;
+  const forecastNext = forecastSeries(revenueSeries, 1, Math.min(3, revenueSeries.length))[0] ?? 0
+  const lastRevenue = revenueSeries[revenueSeries.length - 1] ?? 0
+  const projectedPct = lastRevenue > 0 ? ((forecastNext - lastRevenue) / lastRevenue) * 100 : 0
 
   const topService = serviceForecasts
     .slice()
@@ -271,7 +299,7 @@ export async function getSupabaseDashboardData(userId: string) {
       service: 'No data',
       category: 'General',
       bookings: 0,
-    };
+    }
 
   const topServices = serviceForecasts
     .slice()
@@ -281,47 +309,101 @@ export async function getSupabaseDashboardData(userId: string) {
       name: service.service,
       category: service.category,
       bookings: service.bookings,
-    }));
+    }))
 
-  const restockList = inventory
+  const inventoryItems = inventory
+    .map((item) => {
+      const latestStock = item.stock ?? 0
+      const used = item.used ?? 0
+      const monthDays = getDaysInMonth(item.month)
+      const consumptionRate = monthDays > 0 ? used / monthDays : 0
+      const daysOfCover = consumptionRate > 0 ? latestStock / consumptionRate : Number.POSITIVE_INFINITY
+      const criticalDays = 14
+      const status = daysOfCover < criticalDays ? 'Critical' : daysOfCover < 30 ? 'Low' : 'Healthy'
+      const statusNote = item.status ? `Marked ${item.status}` : null
+      const reorderQuantity = Math.max(0, Math.round((60 * Math.max(consumptionRate, 1)) - latestStock))
+      const unitCost = item.unit_cost ?? 0
+      return {
+        name: item.name,
+        supplier: item.supplier ?? '',
+        stock: latestStock,
+        reorderPoint: item.reorder_point ?? 0,
+        unitCost: unitCost,
+        consumptionRate,
+        daysOfCover,
+        status,
+        statusNote,
+        reorderQuantity,
+        month: item.month,
+      }
+    })
+    .sort((left, right) => left.name.localeCompare(right.name))
+
+  const restockList = inventoryItems
     .map((item) => ({
       name: item.name,
       stock: item.stock,
-      rp: item.reorder_point,
-      days: Math.max(1, Math.round((item.stock / Math.max(1, item.reorder_point)) * 7)),
+      rp: item.reorderPoint,
+      days: Number.isFinite(item.daysOfCover) ? Math.max(1, Math.round(item.daysOfCover)) : 999,
       supplier: item.supplier,
+      status: item.status,
+      unitCost: item.unitCost,
+      reorderQuantity: item.reorderQuantity,
     }))
-    .sort((left, right) => (left.stock - left.rp) - (right.stock - right.rp));
+    .sort((left, right) => left.stock - right.stock)
 
-  const inventoryItems = inventory.map((item) => ({
-    name: item.name,
-    supplier: item.supplier,
-    stock: item.stock,
-    reorderPoint: item.reorder_point,
-    unitCost: item.unit_cost,
-  }));
+  const categorySeries = new Map<string, Map<string, number>>()
+  for (const row of expenseRows) {
+    const bucket = bucketLabelForDate(row.date, granularity)
+    if (!bucket) continue
+    const bucketMap = categorySeries.get(row.category) ?? new Map<string, number>()
+    bucketMap.set(bucket, (bucketMap.get(bucket) ?? 0) + row.amount)
+    categorySeries.set(row.category, bucketMap)
+  }
 
-  const expenseSeries = revenueSeries.map((value) => Math.round(value * 0.38));
-  const netIncomeSeries = revenueSeries.map((value, index) => value - (expenseSeries[index] ?? 0));
+  const expenseCategorySeries = Object.fromEntries(
+    Array.from(categorySeries.entries()).map(([category, bucketMap]) => [
+      category,
+      labels.map((label) => bucketMap.get(label) ?? 0),
+    ])
+  )
 
-  const dailyLog = operations.map(op => {
-    const day = new Date(op.date).toLocaleDateString('en-US', { weekday: 'long' });
-    const expenses = Math.round(Number(op.revenue ?? 0) * 0.38);
-    const net = Number(op.revenue ?? 0) - expenses;
-    const service = services.find(s => s.id === op.service_id);
-    return {
-      date: op.date,
-      day: day,
-      sessions: op.quantity,
-      revenue: op.revenue,
-      expenses: expenses,
-      net: net,
-      topService: service?.name ?? 'N/A'
-    }
-  }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const expenseBreakdown = Array.from(
+    expenseRows.reduce((map, row) => {
+      const existing = map.get(row.category) ?? { category: row.category, total: 0, latestAmount: 0 }
+      existing.total += row.amount
+      existing.latestAmount = row.amount
+      map.set(row.category, existing)
+      return map
+    }, new Map<string, { category: string; total: number; latestAmount: number }>()).values()
+  ).sort((left, right) => right.total - left.total)
+
+  const confidenceBand = {
+    revenue: Math.max(1000, Math.round((revenueSeries[revenueSeries.length - 1] ?? 0) * 0.12)),
+    expense: Math.max(800, Math.round((expenseSeries[expenseSeries.length - 1] ?? 0) * 0.1)),
+  }
+
+  const dailyLog = operations
+    .map((op) => {
+      const day = new Date(op.date).toLocaleDateString('en-US', { weekday: 'long' })
+      const expenses = Math.round(Number(op.revenue ?? 0) * 0.38)
+      const net = Number(op.revenue ?? 0) - expenses
+      const service = op.service_id !== null ? serviceMap.get(op.service_id) : undefined
+      return {
+        date: op.date,
+        day,
+        sessions: op.quantity,
+        revenue: op.revenue,
+        expenses,
+        net,
+        topService: service?.name ?? 'N/A',
+      }
+    })
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
   return {
     months,
+    periodLabels: labels,
     revenueSeries,
     expenseSeries,
     netIncomeSeries,
@@ -334,12 +416,77 @@ export async function getSupabaseDashboardData(userId: string) {
         bookings: topService.bookings,
         category: topService.category,
       },
-      reorderAlerts: inventory.filter((item) => item.stock < item.reorder_point).length,
+      reorderAlerts: inventoryItems.filter((item) => item.status === 'Critical').length,
       modelFit: `${serviceForecasts.length > 0 ? Math.round(serviceForecasts.reduce((sum, item) => sum + parseFloat(item.mape), 0) / serviceForecasts.length) : 0}%`,
     },
     topServices,
     restockList,
     serviceForecasts,
     dailyLog,
-  };
+    expenseBreakdown,
+    expenseCategorySeries,
+    forecastMethodUsed: 'WMA',
+    confidenceBand,
+    dataAvailability: {
+      timeOfDayFillRate: 0,
+      inventoryHasReorderPoints: inventoryItems.some((item) => item.reorderPoint > 0),
+      inventoryHasUnitCost: inventoryItems.some((item) => item.unitCost > 0),
+      dateRangeMonths: Math.max(1, Math.round(labels.length / 4)),
+      expenseCategoriesTracked: expenseBreakdown.map((item) => item.category),
+    },
+  }
+}
+
+export const getSupabaseDashboardData = unstable_cache(getDashboardDataForUser, ['dashboard-data-v2'], {
+  revalidate: 60,
+  tags: ['dashboard-data'],
+})
+
+export async function getWeekdayPatterns(userId: string, options?: DashboardDataOptions) {
+  const data = await getSupabaseDashboardData(userId, options)
+  const weekdayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+  const rows = data.dailyLog ?? []
+  const totals = new Map<string, { revenue: number; sessions: number }>()
+  for (const row of rows) {
+    const date = row.date as string | undefined
+    if (!date) continue
+    const dayName = new Date(date).toLocaleDateString('en-US', { weekday: 'long' })
+    const payload = totals.get(dayName) ?? { revenue: 0, sessions: 0 }
+    payload.revenue += Number(row.revenue ?? 0)
+    payload.sessions += Number(row.sessions ?? 0)
+    totals.set(dayName, payload)
+  }
+  return weekdayNames.map((day) => ({
+    day,
+    revenue: totals.get(day)?.revenue ?? 0,
+    sessions: totals.get(day)?.sessions ?? 0,
+  }))
+}
+
+export async function getServiceByWeekday(userId: string, options?: DashboardDataOptions) {
+  const data = await getSupabaseDashboardData(userId, options)
+  const rows = data.dailyLog ?? []
+  const byDay = new Map<string, Map<string, { revenue: number; sessions: number }>>()
+  for (const row of rows) {
+    const date = row.date as string | undefined
+    const dayName = date ? new Date(date).toLocaleDateString('en-US', { weekday: 'long' }) : 'Unknown'
+    const serviceName = String(row.topService ?? 'Unknown')
+    const bucket = byDay.get(dayName) ?? new Map<string, { revenue: number; sessions: number }>()
+    const payload = bucket.get(serviceName) ?? { revenue: 0, sessions: 0 }
+    payload.revenue += Number(row.revenue ?? 0)
+    payload.sessions += Number(row.sessions ?? 0)
+    bucket.set(serviceName, payload)
+    byDay.set(dayName, bucket)
+  }
+  return Array.from(byDay.entries()).map(([day, services]) => ({ day, services: Array.from(services.entries()).map(([name, values]) => ({ name, ...values })) }))
+}
+
+export async function getExpenseCategoryBreakdown(userId: string, options?: DashboardDataOptions) {
+  const data = await getSupabaseDashboardData(userId, options)
+  return data.expenseBreakdown ?? []
+}
+
+export async function getInventoryConsumptionSignal(userId: string, options?: DashboardDataOptions) {
+  const data = await getSupabaseDashboardData(userId, options)
+  return data.inventoryItems ?? []
 }
