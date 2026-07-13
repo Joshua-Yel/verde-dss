@@ -7,7 +7,16 @@ import { supabase } from "@/src/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 import { useAuth } from '@/app/auth-provider'
 import { useState } from "react";
-import { Menu, X, LogOut } from "lucide-react";
+import {
+  Menu,
+  X,
+  LogOut,
+  LayoutDashboard,
+  TrendingUp,
+  Package,
+  PhilippinePeso,
+  Users,
+} from "lucide-react";
 
 
 type SidebarProps = {
@@ -25,13 +34,33 @@ export default function Sidebar({
 
 
 
-  const links = [
-    { label: 'Overview', href: '/' },
-    { label: 'Service Demand', href: '/service-demand' },
-    { label: 'Inventory', href: '/inventory' },
-    { label: 'Financials', href: '/financials' },
-    { label: 'Staffing', href: '/staffing' },
-  ]
+const links = [
+  {
+    label: "Overview",
+    href: "/",
+    icon: LayoutDashboard,
+  },
+  {
+    label: "Service Demand",
+    href: "/service-demand",
+    icon: TrendingUp,
+  },
+  {
+    label: "Inventory",
+    href: "/inventory",
+    icon: Package,
+  },
+  {
+    label: "Financials",
+    href: "/financials",
+    icon: PhilippinePeso,
+  },
+  {
+    label: "Staffing",
+    href: "/staffing",
+    icon: Users,
+  },
+];
 
   const router = useRouter();
     const handleSignOut = async () => {
@@ -103,32 +132,35 @@ return (
         </div>
 
         <nav className="flex flex-col gap-1">
-          {links.map(({ label, href }) => {
+          {links.map(({ label, href, icon: Icon }) => {
             const isActive =
               pathname === href ||
               (href !== "/" && pathname?.startsWith(href));
 
             return (
               <Link
-                key={href}
-                href={href}
-                onClick={() => setOpen(false)}
-                className={`
-                  flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all
-                  ${
-                    isActive
-                      ? "bg-primary/10 text-primary font-semibold shadow-sm"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }
-                `}
-              >
-                <div
-                  className={`w-1.5 h-6 rounded-full ${
-                    isActive ? "bg-primary" : "bg-transparent"
-                  }`}
-                />
-                {label}
-              </Link>
+  key={href}
+  href={href}
+  onClick={() => setOpen(false)}
+  className={`
+    flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all
+    ${
+      isActive
+        ? "bg-primary/10 text-primary font-semibold shadow-sm"
+        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+    }
+  `}
+>
+  <div
+    className={`w-1.5 h-6 rounded-full ${
+      isActive ? "bg-primary" : "bg-transparent"
+    }`}
+  />
+
+  <Icon className="h-4.5 w-4.5 shrink-0" />
+
+  <span>{label}</span>
+</Link>
             );
           })}
         </nav>

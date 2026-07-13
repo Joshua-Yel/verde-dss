@@ -99,28 +99,32 @@ export default function Topbar({
   )
 }
 
-function handleExport(type: "pdf" | "excel") {
-  const filename = `VERDE_Report_${new Date()
-    .toISOString()
-    .slice(0, 10)}`
+async function handleExport(type: "pdf" | "excel") {
+  const filename = `VERDE_Report_${new Date().toISOString().slice(0, 10)}`
   const ext = type === "pdf" ? "pdf" : "xlsx"
+  const location = window.location.pathname || "/"
+  const title = document.title || "VERDE Dashboard"
 
-  const blob = new Blob([`Mock ${type.toUpperCase()} export from VERDE`], {
-    type:
-      type === "pdf"
-        ? "application/pdf"
-        : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  })
+  try {
+    const response = await fetch(`/api/export/report?format=${type}&path=${encodeURIComponent(location)}&title=${encodeURIComponent(title)}`)
+    if (!response.ok) {
+      throw new Error('Report export failed')
+    }
 
+    const blob = await response.blob()
+    downloadBlob(blob, `${filename}.${ext}`)
+  } catch {
+    console.error('Export failed')
+  }
+}
+
+function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
-
   const a = document.createElement("a")
   a.href = url
-  a.download = `${filename}.${ext}`
-
+  a.download = filename
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
-
   URL.revokeObjectURL(url)
 }
