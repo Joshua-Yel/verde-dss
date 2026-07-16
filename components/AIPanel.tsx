@@ -65,7 +65,7 @@ export default function AIPanel() {
   }
 
   return (
-    <aside className="w-80 border-l border-border bg-sidebar p-5 flex flex-col min-h-screen text-foreground transition-colors duration-200">
+    <aside className="p-5 flex flex-col h-full text-foreground transition-colors duration-200">
 
       {/* Header Area */}
       <div className="flex items-center justify-between pb-4 border-b border-border/60">
