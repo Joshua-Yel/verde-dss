@@ -2,11 +2,11 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { Button } from './ui/button'
 import { supabase } from "@/src/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 import { useAuth } from '@/app/auth-provider'
-import { useState } from "react";
 import {
   Menu,
   X,
@@ -16,7 +16,16 @@ import {
   Package,
   PhilippinePeso,
   Users,
+  ShieldCheck,
+  Download,
 } from "lucide-react";
+import { getConfiguredAdminEmails } from '@/src/lib/adminEmails';
+
+interface BeforeInstallPromptEvent extends Event {
+  readonly platforms: string[];
+  readonly userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+  prompt(): Promise<void>;
+}
 
 
 type SidebarProps = {
@@ -31,8 +40,29 @@ export default function Sidebar({
   const pathname = usePathname()
   const { session } = useAuth()
   const user = session?.user
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault()
+      setDeferredPrompt(event as BeforeInstallPromptEvent)
+    }
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+    }
+  }, [])
 
 
+const adminEmails = getConfiguredAdminEmails();
+
+const isAdmin =
+  !!user?.email &&
+  adminEmails.includes(user.email.toLowerCase());
 
 const links = [
   {
@@ -40,26 +70,43 @@ const links = [
     href: "/",
     icon: LayoutDashboard,
   },
-  {
-    label: "Service Demand",
-    href: "/service-demand",
-    icon: TrendingUp,
-  },
-  {
-    label: "Inventory",
-    href: "/inventory",
-    icon: Package,
-  },
-  {
-    label: "Financials",
-    href: "/financials",
-    icon: PhilippinePeso,
-  },
-  {
-    label: "Staffing",
-    href: "/staffing",
-    icon: Users,
-  },
+
+  // Show these only to non-admins
+  ...(!isAdmin
+    ? [
+        {
+          label: "Service Demand",
+          href: "/service-demand",
+          icon: TrendingUp,
+        },
+        {
+          label: "Inventory",
+          href: "/inventory",
+          icon: Package,
+        },
+        {
+          label: "Financials",
+          href: "/financials",
+          icon: PhilippinePeso,
+        },
+        {
+          label: "Staffing",
+          href: "/staffing",
+          icon: Users,
+        },
+      ]
+    : []),
+
+  // Show only to admins
+  ...(isAdmin
+    ? [
+        {
+          label: "Admin",
+          href: "/admin",
+          icon: ShieldCheck,
+        },
+      ]
+    : []),
 ];
 
   const router = useRouter();
@@ -67,6 +114,20 @@ const links = [
       await supabase.auth.signOut();
       router.push("/login");
     };
+
+  const handleInstallPwa = async () => {
+    if (!deferredPrompt) {
+      window.alert('Open your browser menu and choose “Install app” or “Add to Home Screen” to download the PWA version.')
+      return
+    }
+
+    await deferredPrompt.prompt()
+    const { outcome } = await deferredPrompt.userChoice
+
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null)
+    }
+  }
   
 
 return (
@@ -182,6 +243,15 @@ return (
             </div>
           </div>
         </div>
+
+        <Button
+          variant="outline"
+          className="w-full gap-2 mb-3 md:hidden"
+          onClick={handleInstallPwa}
+        >
+          <Download className="h-4 w-4" />
+          Download PWA
+        </Button>
 
         <Button
           variant="outline"

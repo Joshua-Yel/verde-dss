@@ -10,6 +10,17 @@ const AuthContext = createContext<{ session: Session | null; loading: boolean }>
   loading: true,
 });
 
+function isRefreshTokenError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const message = "message" in error && typeof error.message === "string" ? error.message.toLowerCase() : "";
+  const code = "code" in error && typeof error.code === "string" ? error.code : "";
+
+  return code === "refresh_token_not_found" || message.includes("refresh token") || message.includes("invalid refresh token");
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
@@ -28,12 +39,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
-      if (isMounted) {
-        setSession(currentSession);
-        setLoading(false);
+    const initializeSession = async () => {
+      try {
+        const { data: { session: currentSession }, error } = await supabase.auth.getSession();
+
+        if (!isMounted) return;
+
+        if (error && isRefreshTokenError(error)) {
+          await supabase.auth.signOut({ scope: "global" }).catch(() => undefined);
+          setSession(null);
+        } else {
+          setSession(currentSession);
+        }
+      } catch (error) {
+        if (!isMounted) return;
+
+        if (isRefreshTokenError(error)) {
+          await supabase.auth.signOut({ scope: "global" }).catch(() => undefined);
+          setSession(null);
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
       }
-    });
+    };
+
+    void initializeSession();
 
     return () => {
       isMounted = false;
