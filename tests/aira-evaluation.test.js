@@ -43,6 +43,13 @@ test("AIRA route resolves the Gemini key from persisted config when env vars are
   assert.match(source, /process\.env\.GEMINI_API_KEY/i);
 });
 
+test("Admin config storage uses a writable temp path in Vercel-style environments", () => {
+  const configPath = path.join(__dirname, "..", "src", "lib", "adminConfig.ts");
+  const source = fs.readFileSync(configPath, "utf8");
+
+  assert.match(source, /tmpdir|os\.tmpdir|VERCEL|NEXT_RUNTIME/i);
+});
+
 test("AIRA evaluation suite covers the requested languages and intents", () => {
   assert.ok(Array.isArray(AIRA_TEST_SUITE) && AIRA_TEST_SUITE.length >= 11);
 

@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs';
+import os from 'os';
 import path from 'path';
 
 export type AdminConfig = {
@@ -13,7 +14,19 @@ export type AdminConfig = {
   migrationMessage?: string;
 };
 
-const CONFIG_PATH = path.join(process.cwd(), 'data', 'admin-config.json');
+function getConfigFilePath() {
+  if (process.env.ADMIN_CONFIG_PATH) {
+    return process.env.ADMIN_CONFIG_PATH;
+  }
+
+  if (process.env.VERCEL || process.env.NEXT_RUNTIME) {
+    return path.join(os.tmpdir(), 'verde-admin-config.json');
+  }
+
+  return path.join(process.cwd(), 'data', 'admin-config.json');
+}
+
+const CONFIG_PATH = getConfigFilePath();
 
 function getEnvConfig() {
   const parsedTokenLimit = Number(process.env.GEMINI_TOKEN_LIMIT || 0);
@@ -73,23 +86,34 @@ function normalizeTokenLimit(value: string | number | undefined) {
 }
 
 async function validateGeminiKey(apiKey: string) {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: 'Reply with the single word OK.' }] }],
-      }),
-    }
-  );
+  const models = ['gemini-3.1-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
+  let lastError: Error | null = null;
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(text || 'The Gemini API rejected the key.');
+  for (const model of models) {
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: 'Reply with the single word OK.' }] }],
+          }),
+        }
+      );
+
+      if (response.ok) {
+        return { ok: true, model };
+      }
+
+      const text = await response.text().catch(() => '');
+      lastError = new Error(text || `The Gemini API rejected the key for ${model}.`);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error('The Gemini API could not be reached.');
+    }
   }
 
-  return { ok: true };
+  throw lastError ?? new Error('The Gemini API rejected the key.');
 }
 
 export async function getResolvedGeminiApiKey() {
@@ -120,7 +144,13 @@ export async function getGeminiKeyStatus() {
 }
 
 export async function saveGeminiApiKey(apiKey: string, tokenLimit?: string | number) {
-  await validateGeminiKey(apiKey);
+  let validationMessage: string | null = null;
+
+  try {
+    await validateGeminiKey(apiKey);
+  } catch (error) {
+    validationMessage = error instanceof Error ? error.message : 'The Gemini API could not be validated.';
+  }
 
   const config = await readConfig();
   const normalizedLimit = normalizeTokenLimit(tokenLimit);
@@ -138,6 +168,7 @@ export async function saveGeminiApiKey(apiKey: string, tokenLimit?: string | num
     maskedKey: maskSecret(apiKey),
     lastValidatedAt: config.geminiLastValidatedAt,
     tokenLimit: config.geminiTokenLimit ?? null,
+    validationMessage,
   };
 }
 
