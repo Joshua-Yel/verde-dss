@@ -58,10 +58,10 @@ export default function LineChart({
 
   // 2. Normalize dataset rows cleanly
   const chartData = useMemo(() => {
-    const minLength = Math.min(labels.length, ...datasets.map((d) => d.data.length))
+    const rowCount = labels.length
 
-    return Array.from({ length: minLength }, (_, index) => {
-      const row: Record<string, any> = {
+    return Array.from({ length: rowCount }, (_, index) => {
+      const row: Record<string, number | null | string> = {
         label: labels[index],
       }
       datasets.forEach((dataset) => {

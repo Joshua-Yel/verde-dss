@@ -4,15 +4,22 @@ import { cn } from "@/lib/utils"
 import { AuthProvider } from './auth-provider'
 import AppShell from '@/components/AppShell'
 
+const siteMetadata = {
+  title: 'VERDE | Decision Support System',
+  description: 'AI-Assisted Demand Forecasting & Salon Operations',
+  icons: {
+    icon: '/logo.svg',
+    shortcut: '/logo.svg',
+    apple: '/logo.svg',
+  },
+}
+
 const inter = Inter({ 
   subsets: ['latin'], 
   variable: '--font-sans' 
 })
 
-export const metadata = {
-  title: 'VERDE | Decision Support System',
-  description: 'AI-Assisted Demand Forecasting & Salon Operations',
-}
+export const metadata = siteMetadata
 
 export default function RootLayout({ 
   children 

@@ -2,7 +2,6 @@
 
 import { useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import FilterSpan from './FilterSpan'
 import {
   Table,
   TableBody,
@@ -44,7 +43,7 @@ function filterDailyLog(rows: DailyLogRow[], span: string) {
 
 export default function DailyLogSection({ dailyLog }: { dailyLog: DailyLogRow[] }) {
   const searchParams = useSearchParams()
-  const currentSpan = searchParams.get('span') || '14'
+  const currentSpan = searchParams.get('span') || 'all'
   const router = useRouter()
 
   const filteredDailyLog = useMemo(

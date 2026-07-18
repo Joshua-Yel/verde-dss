@@ -1,6 +1,6 @@
 "use client"
 
-import React from "react"
+import React, { useEffect, useState } from "react"
 import { Calendar, Upload, Download, Menu } from "lucide-react"
 
 import { useUI } from "./UIContext"
@@ -24,6 +24,34 @@ export default function Topbar({
   onMenuClick,
 }: TopbarProps) {
   const { toggleAI, setImportOpen, aiOpen } = useUI()
+  const [dateRangeLabel, setDateRangeLabel] = useState<string | null>(null)
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function loadDateRange() {
+      try {
+        const response = await fetch('/api/dashboard/date-range', { cache: 'no-store' })
+        if (!response.ok) return
+        const payload = await response.json()
+        if (isMounted) {
+          setDateRangeLabel(payload?.rangeLabel ?? null)
+        }
+      } catch {
+        if (isMounted) {
+          setDateRangeLabel(null)
+        }
+      }
+    }
+
+    loadDateRange()
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  const rangeText = dateRangeLabel ?? 'No data'
 
   return (
     <header className="sticky top-0 z-30 w-full border-b bg-background">
@@ -50,7 +78,7 @@ export default function Topbar({
           {/* Hide date on small screens */}
           <div className="hidden lg:flex items-center gap-2 rounded-full border bg-card px-5 py-2.5 text-sm text-muted-foreground">
             <Calendar className="h-4 w-4" />
-            Jan 01 — May 31, 2025
+            {rangeText}
           </div>
 
           {/* Import */}
@@ -76,11 +104,11 @@ export default function Topbar({
             </DropdownMenuTrigger>
 
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => handleExport("pdf")}>
+              <DropdownMenuItem onClick={() => handleExport("pdf")}> 
                 Download as PDF
               </DropdownMenuItem>
 
-              <DropdownMenuItem onClick={() => handleExport("excel")}>
+              <DropdownMenuItem onClick={() => handleExport("excel")}> 
                 Download as Excel
               </DropdownMenuItem>
             </DropdownMenuContent>

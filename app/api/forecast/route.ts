@@ -13,7 +13,8 @@ export async function POST(request: Request) {
     const ws = Array.isArray(weights) ? weights : undefined
     const forecast = wmaForecast(series, h, ws)
     return NextResponse.json({ forecast })
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message || String(err) }, { status: 500 })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

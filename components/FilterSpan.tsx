@@ -7,8 +7,8 @@ export default function FilterSpan() {
   const router = useRouter();
   const searchParams = useSearchParams();
   
-  // Track what filter is active in the URL string, default to '14'
-  const currentVal = searchParams.get('span') || '14';
+  // Track what filter is active in the URL string, default to 'all'
+  const currentVal = searchParams.get('span') || 'all';
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const params = new URLSearchParams(searchParams.toString());

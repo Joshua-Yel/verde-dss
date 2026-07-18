@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useMemo, useRef } from "react"
+import type { Chart as ChartJS, TooltipItem } from "chart.js"
 
 type RevenuePieChartProps = {
   data: number[]
@@ -25,7 +26,10 @@ export default function RevenuePieChart({
   height = 320,
 }: RevenuePieChartProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const chartRef = useRef<any>(null)
+  const chartRef = useRef<ChartJS | null>(null)
+
+  const serializedData = useMemo(() => data.join(","), [data])
+  const serializedLabels = useMemo(() => labels.join(","), [labels])
 
   useEffect(() => {
     let mounted = true
@@ -90,8 +94,10 @@ export default function RevenuePieChart({
 
             tooltip: {
               callbacks: {
-                label: (context: any) => {
-                  return `${context.label}: ${context.formattedValue}`
+                label: (context: TooltipItem<'doughnut'>) => {
+                  const label = context.label ?? ''
+                  const formattedValue = context.formattedValue ?? ''
+                  return `${label}: ${formattedValue}`
                 },
               },
             },
@@ -109,7 +115,7 @@ export default function RevenuePieChart({
         chartRef.current.destroy()
       }
     }
-  }, [data.join(","), labels.join(",")])
+  }, [data, labels, serializedData, serializedLabels])
 
   return (
     <div

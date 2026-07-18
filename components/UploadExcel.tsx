@@ -43,6 +43,7 @@ type OperationsMappedRow = {
   revenue: number | null;
   category?: string | null;
   price?: number | null;
+  amount?: number | null;
   time_of_day?: string | null;
   visit_id?: string | null;
   notes?: string | null;
@@ -229,6 +230,32 @@ export default function UploadExcel() {
     setBusinessKey(null);
   };
 
+  const scoreSheetForImportMode = (headers: string[], mode: ImportMode) => {
+    const normalized = headers.map((header) => header.toLowerCase());
+
+    const includesAny = (candidates: string[]) => {
+      return normalized.some((header) => candidates.some((candidate) => header.includes(candidate.toLowerCase())));
+    };
+
+    if (mode === 'inventory') {
+      return Number(includesAny(['product', 'item', 'sku', 'inventory'])) * 3
+        + Number(includesAny(['unit', 'uom', 'measurement'])) * 2
+        + Number(includesAny(['month', 'period', 'date'])) * 2
+        + Number(includesAny(['opening', 'purchased', 'used', 'closing', 'stock'])) * 2;
+    }
+
+    if (mode === 'expenses') {
+      return Number(includesAny(['date', 'transaction'])) * 3
+        + Number(includesAny(['category', 'expense'])) * 3
+        + Number(includesAny(['amount', 'php', 'price'])) * 3;
+    }
+
+    return Number(includesAny(['date', 'transaction'])) * 3
+      + Number(includesAny(['service', 'name', 'description'])) * 3
+      + Number(includesAny(['quantity', 'qty', 'sessions'])) * 2
+      + Number(includesAny(['revenue', 'amount', 'price', 'total'])) * 2;
+  };
+
   const applyDefaultMapping = (newColumns: string[], mode: ImportMode = importMode) => {
     resetMapping();
     if (mode === 'inventory') {
@@ -291,7 +318,22 @@ export default function UploadExcel() {
     setSheetNames(sheets);
 
     if (sheets.length > 0) {
-      await loadSheet(sheets[0], workbook);
+      let bestSheetName = sheets[0];
+      let bestScore = -1;
+
+      for (const sheetName of sheets) {
+        const worksheet = workbook.Sheets[sheetName];
+        const json = XLSX.utils.sheet_to_json(worksheet, { defval: '' }) as Row[];
+        const headers = Object.keys(json[0] ?? {});
+        const score = scoreSheetForImportMode(headers, importMode);
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestSheetName = sheetName;
+        }
+      }
+
+      await loadSheet(bestSheetName, workbook);
       setStep('map');
     } else {
       setParsed([]);
@@ -385,10 +427,11 @@ export default function UploadExcel() {
         return {
           date: dateKey ? normalizeDate(r[dateKey]) : null,
           service_name: categoryKey ? normalizeText(r[categoryKey]) : '',
-          quantity: amountKey ? normalizeNumber(r[amountKey]) : null,
+          quantity: null,
           revenue: null,
           category: categoryKey ? normalizeExpenseCategory(r[categoryKey]) : null,
           price: amountKey ? normalizeNumber(r[amountKey]) : null,
+          amount: amountKey ? normalizeNumber(r[amountKey]) : null,
           time_of_day: null,
           notes: notesKey ? normalizeText(r[notesKey]) : null,
           business_name: businessKey ? normalizeText(r[businessKey]) : null,
@@ -436,6 +479,17 @@ export default function UploadExcel() {
         }
         if (opRow.revenue === null) {
           errors.push({ type: 'invalid_number', rowIdx: displayRow, message: `Row ${displayRow}: Revenue must contain numeric values.` });
+        }
+      } else if (importMode === 'expenses') {
+        const expRow = row as OperationsMappedRow;
+        if (!expRow.category) {
+          errors.push({ type: 'missing', rowIdx: displayRow, message: `Row ${displayRow}: Category is blank.` });
+        }
+        if (!expRow.date) {
+          errors.push({ type: 'invalid_date', rowIdx: displayRow, message: `Row ${displayRow}: Date must be a valid date.` });
+        }
+        if (expRow.price === null) {
+          errors.push({ type: 'invalid_number', rowIdx: displayRow, message: `Row ${displayRow}: Amount (PHP) must contain numeric values.` });
         }
       } else {
         const invRow = row as InventoryMappedRow;
@@ -722,7 +776,10 @@ export default function UploadExcel() {
 
             <div className="grid grid-cols-3 gap-3">
               <StatBox label="Rows" value={String(parsed.length)} />
-              <StatBox label="Import type" value={importMode === 'operations' ? 'Operations' : 'Inventory'} />
+              <StatBox
+                label="Import type"
+                value={importMode === 'operations' ? 'Operations' : importMode === 'expenses' ? 'Expenses' : 'Inventory'}
+              />
               <StatBox label="File" value={filename ?? '—'} truncate />
             </div>
 

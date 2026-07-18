@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server'
+import { revalidateTag } from 'next/cache'
 import { randomUUID } from 'crypto'
 import supabaseServer from '../../../src/lib/supabaseServer'
 import { createSupabaseRouteClient } from '../../../src/lib/supabaseRoute'
+
+const revalidateDashboardTag = revalidateTag as unknown as (tag: string) => void
 
 type ImportedRow = {
   date?: unknown
@@ -204,8 +207,8 @@ export async function POST(request: Request) {
       }
 
       const existingByName = new Map(existingItems.map((item) => [item.name, item.id]))
-      const inserts: Array<any> = []
-      const updates: Array<any> = []
+      const inserts: Array<Record<string, unknown>> = []
+      const updates: Array<Record<string, unknown>> = []
 
       for (const row of inventoryRows) {
         const name = normalizeString(row.product_name)
@@ -236,8 +239,8 @@ export async function POST(request: Request) {
         }
       }
 
-      const inventoryWriteError = (error: any) => {
-        const message = error?.message ?? String(error)
+      const inventoryWriteError = (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error)
         if (message.includes('public.inventory_items') || message.includes('inventory_items')) {
           return NextResponse.json(
             {
@@ -433,10 +436,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: `No valid operations were created from the upload`, count: mapped.length }, { status: 200 })
     }
 
+    const { error: clearError } = await supabaseServer.from('daily_operations').delete().eq('business_id', businessId)
+    if (clearError) {
+      return NextResponse.json({ error: clearError.message }, { status: 500 })
+    }
+
     const { error: opsError } = await supabaseServer.from('daily_operations').insert(ops)
     if (opsError) {
       return NextResponse.json({ error: opsError.message }, { status: 500 })
     }
+
+    revalidateDashboardTag(`dashboard-data-${businessId}`)
 
     return NextResponse.json({ message: `Imported ${ops.length} operations${duplicateCount ? `, skipped ${duplicateCount} duplicate row(s)` : ''}` })
   } catch (err: unknown) {

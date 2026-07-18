@@ -8,7 +8,6 @@ import { supabase } from "@/src/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 import { useAuth } from '@/app/auth-provider'
 import {
-  Menu,
   X,
   LogOut,
   LayoutDashboard,

@@ -1,6 +1,6 @@
 import { unstable_cache } from 'next/cache'
 import { supabaseServer } from '@/src/lib/supabaseServer'
-import { forecastSeries, wma } from '../forecast/wma'
+import { forecastSeriesForModel, type ForecastModel } from '../forecast/wma'
 import { bucketLabelForDate, resolveDateRange } from '@/lib/dateRange'
 
 interface ServiceRow {
@@ -74,11 +74,43 @@ function getDaysInMonth(month: string | null | undefined) {
   return new Date(year, mon, 0).getDate()
 }
 
+function calculateMape(values: number[], model: ForecastModel, window = 3) {
+  if (values.length < 2) return 0
+
+  const errors: number[] = []
+  for (let index = 1; index < values.length; index += 1) {
+    const history = values.slice(0, index)
+    const prediction = predictNextValue(history, model, Math.min(window, history.length))
+    const actual = values[index]
+    if (actual > 0) {
+      errors.push(Math.abs((actual - prediction) / actual) * 100)
+    }
+  }
+
+  if (errors.length === 0) return 0
+  return errors.reduce((sum, error) => sum + error, 0) / errors.length
+}
+
+function predictNextValue(values: number[], model: ForecastModel, window = 3) {
+  if (values.length === 0) return 0
+  const history = values.slice(-Math.max(1, Math.min(window, values.length)))
+
+  if (model === 'naive') {
+    return history[history.length - 1] ?? 0
+  }
+
+  if (model === 'sma') {
+    return history.reduce((sum, value) => sum + value, 0) / history.length
+  }
+
+  return history.reduce((sum, value, index) => sum + value * (index + 1), 0) / history.reduce((sum, _value, index) => sum + (index + 1), 0)
+}
+
 type RawRow = Record<string, unknown>
 
 interface DashboardDataOptions {
   businessId?: string | null
-  client?: any
+  client?: typeof supabaseServer
 }
 
 async function getRawRows(client: typeof supabaseServer, businessId: string | null, candidateKeys: string[]) {
@@ -88,20 +120,28 @@ async function getRawRows(client: typeof supabaseServer, businessId: string | nu
     .select('data')
     .eq('business_id', businessId)
     .order('created_at', { ascending: false })
+    .range(0, 9999)
 
   if (!data) return [] as RawRow[]
-  const rows: RawRow[] = []
+
   for (const importPayload of data) {
     if (!Array.isArray(importPayload?.data)) continue
+
+    const matchingRows: RawRow[] = []
     for (const row of importPayload.data) {
       const isCandidate = candidateKeys.some((candidate) => Object.keys(row ?? {}).some((key) => key.toLowerCase().includes(candidate.toLowerCase())))
-      if (isCandidate) rows.push(row)
+      if (isCandidate) matchingRows.push(row)
+    }
+
+    if (matchingRows.length > 0) {
+      return matchingRows
     }
   }
-  return rows
+
+  return [] as RawRow[]
 }
 
-async function resolveBusinessId(client: any, userId: string | null | undefined) {
+async function resolveBusinessId(client: typeof supabaseServer, userId: string | null | undefined) {
   if (!userId) return null
 
   const { data: businesses } = await client
@@ -164,16 +204,19 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
       .select('name,supplier,stock,reorder_point,unit_cost')
       .eq('business_id', businessId)
       .order('name')
+      .range(0, 9999)
     const serviceQuery = client
       .from('services')
       .select('id,name,category,price')
       .eq('business_id', businessId)
       .order('name')
+      .range(0, 9999)
     const operationQuery = client
       .from('daily_operations')
       .select('date,quantity,revenue,service_id')
       .eq('business_id', businessId)
       .order('date')
+      .range(0, 9999)
 
     const [{ data: serviceRows }, inventoryResult, { data: operationRows }] = await Promise.all([
       serviceQuery,
@@ -234,7 +277,15 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
     .map((row: RawRow) => {
       const date = normalizeString(row?.date ?? row?.['Date'])
       const category = normalizeString(row?.category ?? row?.['Category'])
-      const amount = normalizeNumber(row?.amount ?? row?.['Amount (PHP)'] ?? row?.['Amount'])
+      const amount = normalizeNumber(
+        row?.amount ??
+        row?.['Amount (PHP)'] ??
+        row?.['Amount'] ??
+        row?.['amount (php)'] ??
+        row?.price ??
+        row?.['Price'] ??
+        row?.['price']
+      )
       if (!date || !category || amount === null) return null
       return { date, category, amount }
     })
@@ -251,6 +302,7 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
   const expenseSeries = expenseRows.length > 0
     ? buildSeriesFromBuckets(expenseRows.map((row) => ({ date: row.date, value: row.amount })), labels, granularity)
     : labels.map(() => 0)
+
   const netIncomeSeries = revenueSeries.map((value, index) => value - (expenseSeries[index] ?? 0))
 
   const serviceSeries = new Map<number, number[]>()
@@ -268,28 +320,40 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
 
   for (const service of services) {
     const totals = serviceTotals.get(service.id) ?? new Map<string, number>()
-    const values = labels.map((label) => totals.get(label) ?? 0)
-    serviceSeries.set(service.id, values)
+    serviceSeries.set(service.id, labels.map((label) => totals.get(label) ?? 0))
   }
 
   const serviceForecasts = services.map((service) => {
     const actuals = serviceSeries.get(service.id) ?? []
-    const forecastValues = forecastSeries(actuals, 3, Math.min(3, actuals.length))
+    const forecastValuesByModel: Record<ForecastModel, number[]> = {
+      wma: forecastSeriesForModel(actuals, 3, Math.min(3, actuals.length), 'wma'),
+      sma: forecastSeriesForModel(actuals, 3, Math.min(3, actuals.length), 'sma'),
+      naive: forecastSeriesForModel(actuals, 3, Math.min(3, actuals.length), 'naive'),
+    }
     const lastActual = actuals[actuals.length - 1] ?? 0
-    const pred = wma(actuals.slice(-3))
-    const mape = lastActual > 0 ? Math.round(Math.abs((lastActual - pred) / lastActual) * 1000) / 10 : 0
+    const mapeByModel = Object.fromEntries(
+      (Object.entries(forecastValuesByModel) as Array<[ForecastModel, number[]]>).map(([model]) => [model, `${calculateMape(actuals, model, Math.min(3, actuals.length)).toFixed(1)}%`])
+    ) as Record<ForecastModel, string>
+    const forecastRevenueByModel = Object.fromEntries(
+      (Object.entries(forecastValuesByModel) as Array<[ForecastModel, number[]]>).map(([model, values]) => [model, Number(service.price ?? 0) * (values[0] ?? 0)])
+    ) as Record<ForecastModel, number>
     return {
       service: service.name,
       category: service.category,
       actuals,
-      forecasts: forecastValues,
-      mape: `${mape}%`,
+      forecasts: forecastValuesByModel.wma,
+      forecastsByModel: forecastValuesByModel,
+      mape: mapeByModel.wma,
+      mapeByModel,
       bookings: lastActual,
+      price: service.price,
+      forecastRevenue: forecastRevenueByModel.wma,
+      forecastRevenueByModel,
       forecastMethodUsed: actuals.length >= 3 ? 'WMA (3-point)' : 'WMA (available history)',
     }
   })
 
-  const forecastNext = forecastSeries(revenueSeries, 1, Math.min(3, revenueSeries.length))[0] ?? 0
+  const forecastNext = forecastSeriesForModel(revenueSeries, 1, Math.min(3, revenueSeries.length), 'wma')[0] ?? 0
   const lastRevenue = revenueSeries[revenueSeries.length - 1] ?? 0
   const projectedPct = lastRevenue > 0 ? ((forecastNext - lastRevenue) / lastRevenue) * 100 : 0
 
@@ -378,10 +442,18 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
     }, new Map<string, { category: string; total: number; latestAmount: number }>()).values()
   ).sort((left, right) => right.total - left.total)
 
+  const totalRevenue = revenueSeries.reduce((sum, value) => sum + value, 0)
+  const totalExpenses = expenseRows.reduce((sum, row) => sum + row.amount, 0)
+  const totalSessions = operations.reduce((sum, row) => sum + Number(row.quantity ?? (row.revenue ? 1 : 0)), 0)
+  const activeDays = new Set(operations.map((row) => row.date)).size || Math.max(1, revenueSeries.length)
+  const avgDailyRevenue = totalRevenue / activeDays
+  const totalNetIncome = totalRevenue - totalExpenses
+
   const confidenceBand = {
     revenue: Math.max(1000, Math.round((revenueSeries[revenueSeries.length - 1] ?? 0) * 0.12)),
     expense: Math.max(800, Math.round((expenseSeries[expenseSeries.length - 1] ?? 0) * 0.1)),
   }
+  
 
   const dailyLog = operations
     .map((op) => {
@@ -411,6 +483,10 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
     kpis: {
       projectedRevenue: Math.round(forecastNext),
       projectedPct: Math.round(projectedPct * 10) / 10,
+      totalSessions,
+      totalRevenue,
+      avgDailyRevenue: Math.round(avgDailyRevenue),
+      totalNetIncome,
       topService: {
         name: topService.service,
         bookings: topService.bookings,
@@ -437,10 +513,18 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
   }
 }
 
-export const getSupabaseDashboardData = unstable_cache(getDashboardDataForUser, ['dashboard-data-v2'], {
-  revalidate: 60,
-  tags: ['dashboard-data'],
-})
+function buildDashboardDataTag(userId?: string | null, businessId?: string | null) {
+  return `dashboard-data-${businessId ?? userId ?? 'anonymous'}`
+}
+
+export function getSupabaseDashboardData(userId: string, options?: DashboardDataOptions) {
+  const cacheKey = ['dashboard-data-v2', userId ?? options?.businessId ?? 'anonymous']
+  const cached = unstable_cache(getDashboardDataForUser, cacheKey, {
+    revalidate: 60,
+    tags: [buildDashboardDataTag(userId, options?.businessId)],
+  })
+  return cached(userId, options)
+}
 
 export async function getWeekdayPatterns(userId: string, options?: DashboardDataOptions) {
   const data = await getSupabaseDashboardData(userId, options)

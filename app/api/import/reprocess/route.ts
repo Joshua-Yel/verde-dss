@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
+import { revalidateTag } from 'next/cache'
 import supabaseServer from '../../../../src/lib/supabaseServer'
+
+const revalidateDashboardTag = revalidateTag as unknown as (tag: string) => void
 
 export async function POST(request: Request) {
   try {
@@ -17,7 +20,7 @@ export async function POST(request: Request) {
     const businessId = businesses && businesses[0] ? businesses[0].id : null
     if (!businessId) return NextResponse.json({ error: 'no business found' }, { status: 400 })
 
-    const findKey = (row: any, candidates: string[]) => {
+    const findKey = (row: Record<string, unknown>, candidates: string[]) => {
       const keys = Object.keys(row || {})
       for (const c of candidates) {
         const match = keys.find(k => k && k.toString().trim().toLowerCase() === c.toLowerCase())
@@ -50,11 +53,11 @@ export async function POST(request: Request) {
         serviceNameToId[name] = found[0].id
         continue
       }
-      const { data: ins, error: insErr } = await supabaseServer.from('services').insert([{ business_id: businessId, name }]).select('id')
+      const { data: ins } = await supabaseServer.from('services').insert([{ business_id: businessId, name }]).select('id')
       if (ins && ins[0]) serviceNameToId[name] = ins[0].id
     }
 
-    const ops: any[] = []
+    const ops: Array<{ business_id: string; service_id: number; date: string; quantity: number | null; revenue: number | null }> = []
     for (const r of rows) {
       const sKey = findKey(r, serviceCandidates)
       const dKey = findKey(r, dateCandidates)
@@ -83,8 +86,10 @@ export async function POST(request: Request) {
     const { error: opsErr } = await supabaseServer.from('daily_operations').insert(ops)
     if (opsErr) return NextResponse.json({ error: opsErr.message }, { status: 500 })
 
+    revalidateDashboardTag(`dashboard-data-${businessId}`)
     return NextResponse.json({ message: `Inserted ${ops.length} operations` })
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message || String(err) }, { status: 500 })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

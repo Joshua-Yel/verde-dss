@@ -2,17 +2,28 @@ import supabaseServer from "../../src/lib/supabaseServer";
 import Card from "../../components/Card";
 import ReprocessImport from "../../components/ReprocessImport";
 
-function Preview({ data }: { data: any }) {
-  try {
-    const json = JSON.stringify(data, null, 2);
-    return (
-      <pre className="text-xs max-h-56 overflow-auto p-2 bg-zinc-50 rounded">
-        {json}
-      </pre>
-    );
-  } catch {
-    return <div className="text-xs">(unavailable preview)</div>;
+type PreviewProps = {
+  data: unknown
+}
+
+type RawImportRow = {
+  id: number
+  filename?: string | null
+  data: unknown
+  created_at: string
+}
+
+function Preview({ data }: PreviewProps) {
+  if (data === undefined) {
+    return <div className="text-xs">(no preview available)</div>
   }
+
+  const json = JSON.stringify(data, null, 2)
+  return (
+    <pre className="text-xs max-h-56 overflow-auto p-2 bg-zinc-50 rounded">
+      {json}
+    </pre>
+  )
 }
 
 export default async function ImportsPage() {
@@ -35,7 +46,7 @@ export default async function ImportsPage() {
 
       <div className="grid gap-4">
         {data?.length ? (
-          data.map((row: any) => (
+          (data as RawImportRow[]).map((row) => (
             <Card key={row.id} title={row.filename || "Import"}>
               <div className="text-sm text-zinc-600 mb-2">
                 Imported at: {new Date(row.created_at).toLocaleString()}

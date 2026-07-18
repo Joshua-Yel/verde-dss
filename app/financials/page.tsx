@@ -62,6 +62,7 @@ async function FinancialsContent() {
   const forecastNetIncome = forecastRevenue - forecastExpenses;
   const margin = forecastRevenue > 0 ? Math.round((forecastNetIncome / forecastRevenue) * 1000) / 10 : 0;
   const hasFinancialData = revenueSeries.length > 0 && revenueSeries.some((value) => value !== 0);
+  const latestLabel = (financials.periodLabels ?? []).slice(-1)[0] ?? 'latest period';
   const forecastRevenueLabel = hasFinancialData ? formatCurrency(forecastRevenue) : 'No data';
   const forecastExpensesLabel = hasFinancialData ? formatCurrency(forecastExpenses) : 'No data';
   const forecastNetIncomeLabel = hasFinancialData ? formatCurrency(forecastNetIncome) : 'No data';
@@ -120,7 +121,7 @@ async function FinancialsContent() {
           {
             label: 'Forecasted Net Income',
             value: forecastNetIncomeLabel,
-            desc: hasFinancialData ? 'vs. May' : 'No data',
+            desc: hasFinancialData ? `vs. ${latestLabel}` : 'No data',
             change: netIncomeChange,
             isPositive: hasFinancialData,
             icon: (
@@ -176,7 +177,7 @@ async function FinancialsContent() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-border/40">
               <div>
                 <h3 className="text-sm font-semibold tracking-tight text-foreground">Revenue vs. Expenses</h3>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Actuals through May, projected for June.</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Actuals through {latestLabel}, projected for the next period.</p>
               </div>
 
               <div className="flex items-center gap-3 text-[10px] font-medium">
@@ -207,7 +208,7 @@ async function FinancialsContent() {
           </div>
 
           <p className="mt-4 pt-3 border-t border-border/40 text-[11px] text-muted-foreground">
-            Fixed costs have held steady since March; the margin gap tracks revenue directly.
+            Fixed costs have held steady recently; the margin gap tracks revenue directly.
           </p>
         </div>
 

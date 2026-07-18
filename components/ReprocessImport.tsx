@@ -16,8 +16,9 @@ export default function ReprocessImport({ id }: { id: number }) {
       })
       const data = await res.json()
       setMessage(data.message || data.error || 'Done')
-    } catch (err: any) {
-      setMessage(String(err.message || err))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setMessage(message)
     }
     setLoading(false)
   }

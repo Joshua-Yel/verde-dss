@@ -74,7 +74,7 @@ async function InventoryContent() {
         {[
           {
             label: 'At or below reorder point',
-            value: hasInventoryData ? `${criticalCount} SKUs` : 'No data',
+            value: hasInventoryData ? `${criticalCount} Items` : 'No data',
             desc: hasInventoryData ? 'Needs a purchase order' : 'No inventory records',
             isAlert: !hasInventoryData || criticalCount > 0,
             icon: (

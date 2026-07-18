@@ -1,7 +1,7 @@
 import React, { Suspense } from 'react';
 import SmallTable from '@/components/SmallTable';
 import { StaffingHeatmapSkeleton, TableCardSkeleton } from '@/components/DailyLogSkeleton';
-import { getServicesForecastTable, getWeekdayPatternsData } from '@/lib/data';
+import { getServicesForecastTable, getWeekdayPatternsData, getMonths } from '@/lib/data';
 
 export const revalidate = 30;
 
@@ -36,19 +36,33 @@ export default function StaffingPage() {
 }
 
 async function StaffingContent() {
-  const svcTable = await getServicesForecastTable();
-  const weekdayPatterns = await getWeekdayPatternsData();
+  const [svcTable, weekdayPatterns, monthLabels] = await Promise.all([
+    getServicesForecastTable(),
+    getWeekdayPatternsData(),
+    getMonths(),
+  ]);
 
-  const totalProjectedVolume = svcTable.reduce((sum, service) => sum + Math.round(service.forecasts[0] || 0), 0);
-  const weekdayTotals = weekdayPatterns.filter((entry) => entry.sessions > 0);
-  const fallback = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => {
-    const multiplier = index === 6 ? 0.2 : index === 5 ? 1.15 : index === 4 ? 0.95 : index === 3 ? 0.8 : index === 2 ? 0.7 : index === 1 ? 0.55 : 0.45;
-    return { day, multiplier };
-  });
-  const recommendedStaffing = (weekdayTotals.length >= 7 ? weekdayPatterns : fallback.map((entry) => ({ day: entry.day, sessions: 0, revenue: 0 }))).map((entry, index) => {
-    const forecastSessions = weekdayTotals.length >= 7
-      ? Math.max(0, Math.round(entry.sessions || 0))
-      : Math.max(0, Math.round((totalProjectedVolume / 7) * (fallback[index]?.multiplier ?? 1)));
+  const displayMonthLabels = monthLabels.length > 0
+    ? monthLabels.slice(-5)
+    : ['Period 1', 'Period 2', 'Period 3', 'Period 4', 'Period 5'];
+
+  const totalProjectedVolume = svcTable.reduce((sum, service) => {
+    const nextMonthForecast = service.forecastsByModel?.wma?.[0] ?? service.forecasts?.[0] ?? 0;
+    return sum + Math.round(nextMonthForecast || 0);
+  }, 0);
+
+  const weekdayLabels = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] as const;
+  const weekdayShortLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
+  const weekdayLookup = new Map(
+    weekdayPatterns.map((entry) => [String(entry.day ?? '').toLowerCase(), entry])
+  );
+
+  const recommendedStaffing = weekdayLabels.map((dayName, index) => {
+    const entry = weekdayLookup.get(dayName.toLowerCase()) ?? weekdayLookup.get(weekdayShortLabels[index].toLowerCase());
+    const actualSessions = Number(entry?.sessions ?? 0);
+    const forecastSessions = actualSessions > 0
+      ? Math.max(0, Math.round(actualSessions))
+      : Math.max(1, Math.round((totalProjectedVolume / 7) * (index === 5 || index === 6 ? 1.08 : 0.94)));
     const demand = forecastSessions > 35 ? 'Critical' : forecastSessions > 25 ? 'Peak' : forecastSessions > 18 ? 'High' : forecastSessions > 10 ? 'Medium' : 'Low';
     const recommended = forecastSessions === 0 ? '0 Staff' : `${Math.max(1, Math.round(forecastSessions / 12))} Staff`;
     const badgeStyle = forecastSessions === 0
@@ -62,7 +76,7 @@ async function StaffingContent() {
             : 'text-zinc-600 dark:text-zinc-400 bg-zinc-500/10 border-zinc-500/20';
 
     return {
-      day: entry.day ?? '',
+      day: weekdayShortLabels[index],
       forecastSessions,
       demand,
       recommended,
@@ -70,19 +84,22 @@ async function StaffingContent() {
     };
   });
 
-  const heatmapGrid = Array.from({ length: 6 }, (_, dayIdx) =>
-    Array.from({ length: 12 }, (_, hourIdx) => {
-      const base = Math.round((totalProjectedVolume / 18) * (0.6 + dayIdx * 0.14) + hourIdx * 0.2);
-      return Math.min(10, Math.max(1, base));
-    })
-  );
+  const maxDailyDemand = Math.max(1, ...recommendedStaffing.map((row) => row.forecastSessions));
+  const heatmapGrid = recommendedStaffing.map((row) => {
+    const hourlyWeights = [0.55, 0.66, 0.78, 0.92, 1.08, 1.24, 1.45, 1.62, 1.42, 1.12, 0.84, 0.62];
+    const weekendBoost = row.day === 'Sat' || row.day === 'Sun' ? 1.08 : 1;
+    const normalizedDemand = row.forecastSessions / maxDailyDemand;
+    return Array.from({ length: 12 }, (_, hourIdx) => {
+      const loadFactor = 1 + normalizedDemand * 8.5 * hourlyWeights[hourIdx] * weekendBoost;
+      return Math.min(10, Math.max(1, Math.round(loadFactor)));
+    });
+  });
 
   const heatmapValues = heatmapGrid.flat();
   const peakCell = heatmapGrid
     .flatMap((row, dayIdx) => row.map((value, hourIdx) => ({ dayIdx, hourIdx, value })))
     .reduce((best, current) => (current.value > best.value ? current : best), { dayIdx: 0, hourIdx: 0, value: 0 });
-  const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const peakDayLabel = dayLabels[peakCell.dayIdx] ?? `D${peakCell.dayIdx + 1}`;
+  const peakDayLabel = weekdayShortLabels[peakCell.dayIdx] ?? `D${peakCell.dayIdx + 1}`;
   const peakHourLabel = `${peakCell.hourIdx + 9 > 12 ? `${peakCell.hourIdx + 9 - 12} PM` : peakCell.hourIdx + 9 === 12 ? '12 PM' : `${peakCell.hourIdx + 9} AM`}`;
   const averageUtilization = (heatmapValues.reduce((sum, value) => sum + value, 0) / heatmapValues.length / 10) * 100;
   const scheduleCorrections = recommendedStaffing.filter((row) => row.demand === 'Critical' || row.demand === 'Peak' || row.demand === 'High').length;
@@ -175,7 +192,7 @@ async function StaffingContent() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-border/40">
           <div>
             <h3 className="text-sm font-semibold text-foreground">Session Volume by Hour</h3>
-            <p className="mt-1 text-[11px] text-muted-foreground">Mon–Sat, 9:00 AM–8:00 PM.</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">Mon–Sun, 9:00 AM–8:00 PM.</p>
           </div>
 
           <div className="flex items-center gap-1 text-[9px] text-muted-foreground font-mono bg-background/60 p-1.5 rounded-lg border border-border/30 self-start sm:self-center">
@@ -246,20 +263,38 @@ async function StaffingContent() {
           </div>
           <div className="overflow-x-auto">
             <SmallTable
-              columns={["Service", "Category", "Jan", "Feb", "Mar", "Apr", "May", "F1", "F2", "F3", "MAPE"]}
-              rows={svcTable.map((s) => ({
-                Service: <span className="font-medium text-foreground text-xs">{s.service}</span>,
-                Category: <span className="text-muted-foreground text-xs">{s.category}</span>,
-                Jan: <span className="font-mono text-xs text-muted-foreground/80">{s.actuals[0]}</span>,
-                Feb: <span className="font-mono text-xs text-muted-foreground/80">{s.actuals[1]}</span>,
-                Mar: <span className="font-mono text-xs text-muted-foreground/80">{s.actuals[2]}</span>,
-                Apr: <span className="font-mono text-xs text-muted-foreground/80">{s.actuals[3]}</span>,
-                May: <span className="font-mono text-xs text-muted-foreground/80">{s.actuals[4]}</span>,
-                F1: <span className="font-mono font-bold text-xs text-primary">{Math.round(s.forecasts[0] || 0)}</span>,
-                F2: <span className="font-mono font-medium text-xs text-foreground/80">{Math.round(s.forecasts[1] || 0)}</span>,
-                F3: <span className="font-mono text-xs text-muted-foreground">{Math.round(s.forecasts[2] || 0)}</span>,
-                MAPE: <span className={`font-mono text-[11px] font-semibold px-1.5 py-0.5 rounded ${Number.parseFloat(s.mape) < 10 ? '' : 'bg-zinc-500/10 text-muted-foreground'}`} style={Number.parseFloat(s.mape) < 10 ? { backgroundColor: 'hsl(var(--success) / 0.1)', color: 'hsl(var(--success))' } : undefined}>{s.mape}%</span>,
-              }))}
+              columns={[
+                "Service",
+                "Category",
+                ...displayMonthLabels,
+                "Next Month",
+                "2 Months Ahead",
+                "3 Months Ahead",
+                "MAPE",
+              ]}
+              rows={svcTable.map((service) => {
+                const forecastValues = service.forecastsByModel?.wma ?? service.forecasts ?? [];
+                const mapeValue = service.mapeByModel?.wma ?? service.mape ?? '0.0%';
+                const numericMape = Number.parseFloat(mapeValue);
+                const displayedActuals = service.actuals.slice(-displayMonthLabels.length);
+
+                return {
+                  Service: <span className="font-medium text-foreground text-xs">{service.service}</span>,
+                  Category: <span className="text-muted-foreground text-xs">{service.category}</span>,
+                  ...Object.fromEntries(
+                    displayMonthLabels.map((label, index) => [
+                      label,
+                      <span key={label} className="font-mono text-xs text-muted-foreground/80">
+                        {displayedActuals[index] ?? '-'}
+                      </span>,
+                    ])
+                  ),
+                  'Next Month': <span className="font-mono font-bold text-xs text-primary">{Math.round(forecastValues[0] || 0)}</span>,
+                  '2 Months Ahead': <span className="font-mono font-medium text-xs text-foreground/80">{Math.round(forecastValues[1] || 0)}</span>,
+                  '3 Months Ahead': <span className="font-mono text-xs text-muted-foreground">{Math.round(forecastValues[2] || 0)}</span>,
+                  MAPE: <span className={`font-mono text-[11px] font-semibold px-1.5 py-0.5 rounded ${Number.isFinite(numericMape) && numericMape < 10 ? '' : 'bg-zinc-500/10 text-muted-foreground'}`} style={Number.isFinite(numericMape) && numericMape < 10 ? { backgroundColor: 'hsl(var(--success) / 0.1)', color: 'hsl(var(--success))' } : undefined}>{mapeValue}</span>,
+                };
+              })}
             />
           </div>
         </div>
@@ -270,7 +305,7 @@ async function StaffingContent() {
 
 function Heatmap({ grid }: { grid: number[][] }) {
   const hours = Array.from({ length: 12 }, (_, i) => 9 + i);
-  const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
   return (
     <div className="space-y-2 mt-1">
@@ -301,7 +336,7 @@ function Heatmap({ grid }: { grid: number[][] }) {
       <div className="flex gap-1 pl-[46px] pt-1">
         {hours.map((h) => (
           <span key={h} className="flex-1 text-center text-[10px] font-mono text-muted-foreground/70 tracking-tighter">
-            {h > 12 ? `${h - 12}p` : h === 12 ? '12p' : `${h}a`}
+            {h > 12 ? `${h - 12}pm` : h === 12 ? '12pm' : `${h}am`}
           </span>
         ))}
       </div>

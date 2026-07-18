@@ -649,7 +649,7 @@ export default function AdminDashboardClient({
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
               <h2 className="text-lg font-semibold text-foreground">Database Migration</h2>
-              <p className="text-sm text-muted-foreground">Record that you've reviewed the migration checklist</p>
+              <p className="text-sm text-muted-foreground">Record that you&apos;ve reviewed the migration checklist</p>
             </div>
             <button
               className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-6 py-2.5 text-sm font-medium transition-all hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed"

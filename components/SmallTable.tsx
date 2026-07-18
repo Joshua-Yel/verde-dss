@@ -1,3 +1,4 @@
+import { type ReactNode } from 'react'
 import {
   Table,
   TableBody,
@@ -7,7 +8,9 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
-export default function SmallTable({ columns, rows }: { columns: string[]; rows: any[] }) {
+type SmallTableRow = Record<string, ReactNode>
+
+export default function SmallTable({ columns, rows }: { columns: string[]; rows: SmallTableRow[] }) {
   return (
     <Table>
       <TableHeader>
@@ -20,11 +23,15 @@ export default function SmallTable({ columns, rows }: { columns: string[]; rows:
       <TableBody>
         {rows.map((r, i) => (
           <TableRow key={i}>
-            {columns.map((c, j) => (
-              <TableCell key={j} className={typeof r[c] === 'number' ? 'text-right' : ''}>
-                {r[c] ?? '-'}
-              </TableCell>
-            ))}
+            {columns.map((c, j) => {
+              const value = r[c]
+              const displayValue = value === undefined || value === null ? '-' : value
+              return (
+                <TableCell key={j} className={typeof value === 'number' ? 'text-right' : ''}>
+                  {displayValue}
+                </TableCell>
+              )
+            })}
           </TableRow>
         ))}
       </TableBody>

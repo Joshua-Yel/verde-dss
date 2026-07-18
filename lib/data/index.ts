@@ -27,6 +27,13 @@ const getCurrentUserId = cache(async (): Promise<string> => {
   return user.id
 })
 
+// NOTE: every getX() below independently calls getSupabaseDashboardData().
+// This is intentional and cheap — getSupabaseDashboardData is wrapped in
+// React's cache() (see supabase.ts), so all calls with the same
+// (userId, businessId) within a single request/render dedupe into one
+// underlying Supabase fetch sequence, no matter how many Suspense
+// boundaries call in independently.
+
 export async function getMonths(options?: DashboardDataOptions) {
   const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
   const data = await getSupabaseDashboardData(userId ?? '', { businessId: options?.businessId })

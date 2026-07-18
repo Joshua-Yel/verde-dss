@@ -37,11 +37,11 @@ function startOfMonth(value: Date): Date {
 
 function formatBucketLabel(value: Date, granularity: PeriodGranularity): string {
   if (granularity === 'daily') {
-    return value.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    return value.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   }
 
   if (granularity === 'weekly') {
-    return `${value.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+    return `${value.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
   }
 
   return value.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
@@ -49,7 +49,7 @@ function formatBucketLabel(value: Date, granularity: PeriodGranularity): string 
 
 function buildLabels(start: Date, end: Date, granularity: PeriodGranularity): string[] {
   const labels: string[] = []
-  let cursor = granularity === 'daily' ? startOfDay(start) : granularity === 'weekly' ? startOfWeek(start) : startOfMonth(start)
+  const cursor = granularity === 'daily' ? startOfDay(start) : granularity === 'weekly' ? startOfWeek(start) : startOfMonth(start)
   const endBoundary = granularity === 'daily' ? startOfDay(end) : granularity === 'weekly' ? startOfWeek(end) : startOfMonth(end)
 
   while (cursor <= endBoundary) {
