@@ -50,6 +50,13 @@ test("Admin config storage uses a writable temp path in Vercel-style environment
   assert.match(source, /tmpdir|os\.tmpdir|VERCEL|NEXT_RUNTIME/i);
 });
 
+test("Admin usage tracking uses a writable temp path in Vercel-style environments", () => {
+  const usagePath = path.join(__dirname, "..", "src", "lib", "adminAccess.ts");
+  const source = fs.readFileSync(usagePath, "utf8");
+
+  assert.match(source, /tmpdir|os\.tmpdir|VERCEL|NEXT_RUNTIME/i);
+});
+
 test("AIRA evaluation suite covers the requested languages and intents", () => {
   assert.ok(Array.isArray(AIRA_TEST_SUITE) && AIRA_TEST_SUITE.length >= 11);
 

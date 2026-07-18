@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs';
+import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { createSupabaseRouteClient } from './supabaseRoute';
@@ -18,7 +19,19 @@ function hasAdminRole(user: { app_metadata?: Record<string, unknown>; user_metad
   return [appRole, userRole, appAdminFlag, userAdminFlag].some((value) => value === 'admin' || value === 'owner' || value === true);
 }
 
-const USAGE_PATH = path.join(process.cwd(), 'data', 'user-usage.json');
+function getUsageStorePath() {
+  if (process.env.ADMIN_USAGE_PATH) {
+    return process.env.ADMIN_USAGE_PATH;
+  }
+
+  if (process.env.VERCEL || process.env.NEXT_RUNTIME) {
+    return path.join(os.tmpdir(), 'verde-user-usage.json');
+  }
+
+  return path.join(process.cwd(), 'data', 'user-usage.json');
+}
+
+const USAGE_PATH = getUsageStorePath();
 
 async function ensureUsageStore() {
   await fs.mkdir(path.dirname(USAGE_PATH), { recursive: true });
