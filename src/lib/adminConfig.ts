@@ -92,6 +92,12 @@ async function validateGeminiKey(apiKey: string) {
   return { ok: true };
 }
 
+export async function getResolvedGeminiApiKey() {
+  const envConfig = getEnvConfig();
+  const config = await readConfig();
+  return envConfig.geminiApiKey || config.geminiApiKey || '';
+}
+
 export async function getGeminiKeyStatus() {
   const envConfig = getEnvConfig();
   const config = await readConfig();

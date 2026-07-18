@@ -28,6 +28,21 @@ test("AIRA system prompt instructs the assistant to analyze available data befor
   assert.match(source, /Based on the available dashboard data/i);
 });
 
+test("AIRA route resolves the Gemini key from persisted config when env vars are missing", () => {
+  const promptPath = path.join(
+    __dirname,
+    "..",
+    "app",
+    "api",
+    "aira",
+    "route.ts",
+  );
+  const source = fs.readFileSync(promptPath, "utf8");
+
+  assert.match(source, /getResolvedGeminiApiKey/i);
+  assert.match(source, /process\.env\.GEMINI_API_KEY/i);
+});
+
 test("AIRA evaluation suite covers the requested languages and intents", () => {
   assert.ok(Array.isArray(AIRA_TEST_SUITE) && AIRA_TEST_SUITE.length >= 11);
 

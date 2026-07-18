@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveAuthenticatedBusinessId, applyNoStoreHeaders } from '@/src/lib/ariaAccess';
 import { getAriaContextSummary } from '@/src/lib/ariaContext';
-import { getGeminiKeyStatus, getSystemStatus } from '@/src/lib/adminConfig';
+import { getGeminiKeyStatus, getResolvedGeminiApiKey, getSystemStatus } from '@/src/lib/adminConfig';
 import { recordUserUsage } from '@/src/lib/adminAccess';
 
 // gemini-2.5-flash started returning 404 "no longer available to new users"
 // as of July 9, 2026 — earlier than its officially listed Oct 16, 2026
 // shutdown date (a known issue Google hasn't fully explained yet).
 // gemini-3.1-flash-lite is confirmed working as of this writing.
-const GEMINI_MODEL = 'gemini-3.1-flash-lite';
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite';
+const GEMINI_MODEL_FALLBACKS = [
+  process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL,
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+].filter((value, index, all) => Boolean(value) && all.indexOf(value) === index);
 
 interface ChatMessage {
   role: 'user' | 'model';
@@ -84,6 +88,64 @@ function buildAnalyticalFallbackReply(userText: string, serverContext: Record<st
   return '';
 }
 
+async function tryGeminiWithFallbacks({
+  geminiKey,
+  contents,
+  systemInstructionText,
+  lastUserMessage,
+  serverContext,
+}: {
+  geminiKey: string;
+  contents: Array<{ role: string; parts: Array<{ text: string }> }>;
+  systemInstructionText: string;
+  lastUserMessage: string;
+  serverContext: Record<string, unknown> | null;
+}) {
+  let lastError: unknown;
+
+  for (const model of GEMINI_MODEL_FALLBACKS) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents,
+          systemInstruction: { parts: [{ text: systemInstructionText }] },
+          generationConfig: {
+            temperature: 0.05,
+            maxOutputTokens: 512,
+          },
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!geminiRes.ok) {
+        const errText = await geminiRes.text().catch(() => '');
+        lastError = { model, status: geminiRes.status, errText };
+        continue;
+      }
+
+      const data = await geminiRes.json();
+      const candidate = data?.candidates?.[0];
+      const reply: string = candidate?.content?.parts?.map((p: { text?: string }) => p.text ?? '').join('') ?? '';
+      if (reply.trim()) {
+        return { reply, usedFallback: false };
+      }
+
+      lastError = { model, finishReason: candidate?.finishReason };
+    } catch (error) {
+      lastError = { model, error };
+    }
+  }
+
+  const fallbackReply = buildAnalyticalFallbackReply(lastUserMessage, serverContext) || 'I’m having trouble reaching the AI service right now, but I can still help with the dashboard snapshot and the most recent metrics.';
+  console.warn('AIRA Gemini fallback used', lastError);
+  return { reply: fallbackReply, usedFallback: true };
+}
+
 export async function POST(req: NextRequest) {
   const { businessId, userId } = await resolveAuthenticatedBusinessId();
   if (!businessId) {
@@ -134,7 +196,7 @@ export async function POST(req: NextRequest) {
   }));
 
   try {
-    const geminiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+    const geminiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || await getResolvedGeminiApiKey();
     if (!geminiKey) {
       const persisted = await getGeminiKeyStatus();
       if (!persisted.configured) {
@@ -142,48 +204,23 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const geminiRes = await fetch(`${GEMINI_URL}?key=${geminiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents,
-        systemInstruction: { parts: [{ text: systemInstructionText }] },
-        generationConfig: {
-          temperature: 0.05,
-          maxOutputTokens: 512,
-        },
-      }),
-    });
-
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text().catch(() => '');
-      console.error('Gemini API error', geminiRes.status, errText);
-      return applyNoStoreHeaders(
-        NextResponse.json(
-          { error: 'The AI service returned an error. Please try again.' },
-          { status: 502 }
-        )
-      );
-    }
-
-    const data = await geminiRes.json();
-    const candidate = data?.candidates?.[0];
-    const reply: string = candidate?.content?.parts?.map((p: { text?: string }) => p.text ?? '').join('') ?? '';
     const lastUserMessage = messages.slice(-1)[0]?.content ?? '';
-    const repairedReply = looksLikeConservativeResponse(reply) && lastUserMessage
-      ? buildAnalyticalFallbackReply(lastUserMessage, serverContext) || reply
-      : reply;
+    const generationResult = await tryGeminiWithFallbacks({
+      geminiKey,
+      contents,
+      systemInstructionText,
+      lastUserMessage,
+      serverContext,
+    });
+    const repairedReply = looksLikeConservativeResponse(generationResult.reply) && lastUserMessage
+      ? buildAnalyticalFallbackReply(lastUserMessage, serverContext) || generationResult.reply
+      : generationResult.reply;
 
     if (!repairedReply.trim()) {
-      const finishReason = candidate?.finishReason;
-      const message =
-        finishReason === 'SAFETY'
-          ? "I can't answer that one — try rephrasing."
-          : 'No response was generated. Please try again.';
-      return applyNoStoreHeaders(NextResponse.json({ error: message }, { status: 502 }));
+      return applyNoStoreHeaders(NextResponse.json({ error: 'No response was generated. Please try again.' }, { status: 502 }));
     }
 
-    return applyNoStoreHeaders(NextResponse.json({ reply: repairedReply }));
+    return applyNoStoreHeaders(NextResponse.json({ reply: repairedReply, usedFallback: generationResult.usedFallback }));
   } catch (err) {
     console.error('Failed to reach Gemini API', err);
     return applyNoStoreHeaders(
