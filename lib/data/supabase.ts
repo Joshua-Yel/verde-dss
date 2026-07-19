@@ -1,7 +1,8 @@
+import { cache } from 'react'
 import { unstable_cache } from 'next/cache'
 import { supabaseServer } from '@/src/lib/supabaseServer'
 import { forecastSeriesForModel, type ForecastModel } from '../forecast/wma'
-import { bucketLabelForDate, resolveDateRange } from '@/lib/dateRange'
+import { bucketKeyForDate, resolveDateRange, type PeriodGranularity } from '@/lib/dateRange'
 
 interface ServiceRow {
   id: number
@@ -46,23 +47,27 @@ function normalizeNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-function buildSeriesFromBuckets(rows: Array<{ date: string; value: number }>, labels: string[], granularity: 'daily' | 'weekly' | 'monthly') {
+// Groups rows by cheap bucket key (see dateRange.ts) instead of formatting
+// a display label per row. `keys` is DateRangeSummary.keys — parallel to
+// the display `labels` array, so the returned series lines up with labels
+// in the same order without re-deriving anything.
+function buildSeriesFromBuckets(rows: Array<{ date: string; value: number }>, keys: string[], granularity: PeriodGranularity) {
   const bucketMap = new Map<string, number>()
   for (const row of rows) {
-    const bucket = bucketLabelForDate(row.date, granularity)
-    if (!bucket) continue
-    const current = bucketMap.get(bucket) ?? 0
-    bucketMap.set(bucket, current + row.value)
+    const key = bucketKeyForDate(row.date, granularity)
+    if (!key) continue
+    const current = bucketMap.get(key) ?? 0
+    bucketMap.set(key, current + row.value)
   }
-  return labels.map((label) => bucketMap.get(label) ?? 0)
+  return keys.map((key) => bucketMap.get(key) ?? 0)
 }
 
-function buildSeriesFromOperations(rows: OperationRow[], labels: string[], granularity: 'daily' | 'weekly' | 'monthly') {
+function buildSeriesFromOperations(rows: OperationRow[], keys: string[], granularity: PeriodGranularity) {
   return buildSeriesFromBuckets(
     rows
       .filter((row) => row.date)
       .map((row) => ({ date: row.date, value: Number(row.revenue ?? 0) })),
-    labels,
+    keys,
     granularity
   )
 }
@@ -115,8 +120,13 @@ interface DashboardDataOptions {
   lookbackMonths?: number
 }
 
-async function getRawRows(client: typeof supabaseServer, businessId: string | null, candidateKeys: string[]) {
-  if (!businessId) return [] as RawRow[]
+// Fetches every raw_imports payload for a business ONCE. Previously each
+// caller (inventory matching, expense matching) ran its own full query
+// against raw_imports — same table, same rows, fetched twice over the
+// wire. Matching against the different candidate-key sets now happens
+// in-memory against this single fetched result.
+async function fetchRawImportPayloads(client: typeof supabaseServer, businessId: string | null): Promise<RawRow[][]> {
+  if (!businessId) return []
   const { data } = await client
     .from('raw_imports')
     .select('data')
@@ -124,23 +134,27 @@ async function getRawRows(client: typeof supabaseServer, businessId: string | nu
     .order('created_at', { ascending: false })
     .range(0, 9999)
 
-  if (!data) return [] as RawRow[]
+  if (!data) return []
 
-  for (const importPayload of data) {
-    if (!Array.isArray(importPayload?.data)) continue
+  return data
+    .map((importPayload) => (Array.isArray(importPayload?.data) ? (importPayload.data as RawRow[]) : null))
+    .filter((rows): rows is RawRow[] => rows !== null)
+}
 
+// Pure, in-memory — no network. Walks import payloads (newest first) and
+// returns the rows of the first payload whose keys match any candidate.
+function findMatchingRows(importPayloads: RawRow[][], candidateKeys: string[]): RawRow[] {
+  for (const rows of importPayloads) {
     const matchingRows: RawRow[] = []
-    for (const row of importPayload.data) {
-      const isCandidate = candidateKeys.some((candidate) => Object.keys(row ?? {}).some((key) => key.toLowerCase().includes(candidate.toLowerCase())))
+    for (const row of rows) {
+      const isCandidate = candidateKeys.some((candidate) =>
+        Object.keys(row ?? {}).some((key) => key.toLowerCase().includes(candidate.toLowerCase()))
+      )
       if (isCandidate) matchingRows.push(row)
     }
-
-    if (matchingRows.length > 0) {
-      return matchingRows
-    }
+    if (matchingRows.length > 0) return matchingRows
   }
-
-  return [] as RawRow[]
+  return []
 }
 
 async function resolveBusinessId(client: typeof supabaseServer, userId: string | null | undefined) {
@@ -198,6 +212,18 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
   const lookbackMonths = options?.lookbackMonths ?? null
   const displayRange = options?.displayRange ?? 'all'
 
+  // Computed up-front so it can be pushed into the daily_operations query
+  // itself (see below), instead of being applied only after fetching every
+  // row for the full history. This is what actually makes "Last year" /
+  // "Last 2 years" cheaper than "All records" — previously all three
+  // fetched the same full dataset and only differed in a JS-side slice at
+  // the very end.
+  const cutoffDate = typeof lookbackMonths === 'number' && lookbackMonths > 0 ? new Date() : null
+  if (cutoffDate && typeof lookbackMonths === 'number') {
+    cutoffDate.setMonth(cutoffDate.getMonth() - lookbackMonths)
+  }
+  const cutoffDateISO = cutoffDate ? cutoffDate.toISOString().slice(0, 10) : null
+
   let services: ServiceRow[] = []
   let inventory: InventoryRow[] = []
   let operations: OperationRow[] = []
@@ -215,12 +241,17 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
       .eq('business_id', businessId)
       .order('name')
       .range(0, 9999)
-    const operationQuery = client
+
+    let operationQueryBuilder = client
       .from('daily_operations')
       .select('date,quantity,revenue,service_id')
       .eq('business_id', businessId)
-      .order('date')
-      .range(0, 9999)
+
+    if (cutoffDateISO) {
+      operationQueryBuilder = operationQueryBuilder.gte('date', cutoffDateISO)
+    }
+
+    const operationQuery = operationQueryBuilder.order('date').range(0, 9999)
 
     const [{ data: serviceRows }, inventoryResult, { data: operationRows }] = await Promise.all([
       serviceQuery,
@@ -236,8 +267,9 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
     }
   }
 
-  const rawInventoryRows = await getRawRows(client, businessId, ['product_name', 'product', 'closing_stock', 'opening_stock', 'used'])
-  const rawExpenseRows = await getRawRows(client, businessId, ['amount', 'category'])
+  const rawImportPayloads = await fetchRawImportPayloads(client, businessId)
+  const rawInventoryRows = findMatchingRows(rawImportPayloads, ['product_name', 'product', 'closing_stock', 'opening_stock', 'used'])
+  const rawExpenseRows = findMatchingRows(rawImportPayloads, ['amount', 'category'])
 
   const inventoryFromRaw = rawInventoryRows
     .map((row: RawRow) => {
@@ -277,11 +309,6 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
     })) as InventoryRow[]
   }
 
-  const cutoffDate = typeof lookbackMonths === 'number' && lookbackMonths > 0 ? new Date() : null
-  if (cutoffDate && typeof lookbackMonths === 'number') {
-    cutoffDate.setMonth(cutoffDate.getMonth() - lookbackMonths)
-  }
-
   const expenseRows = rawExpenseRows
     .map((row: RawRow) => {
       const date = normalizeString(row?.date ?? row?.['Date'])
@@ -308,9 +335,10 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
   const range = resolveDateRange(dates)
   const granularity = range.granularity
   const labels = range.labels
-  const revenueSeries = buildSeriesFromOperations(operations, labels, granularity)
+  const bucketKeys = range.keys
+  const revenueSeries = buildSeriesFromOperations(operations, bucketKeys, granularity)
   const expenseSeries = expenseRows.length > 0
-    ? buildSeriesFromBuckets(expenseRows.map((row) => ({ date: row.date, value: row.amount })), labels, granularity)
+    ? buildSeriesFromBuckets(expenseRows.map((row) => ({ date: row.date, value: row.amount })), bucketKeys, granularity)
     : labels.map(() => 0)
 
   const netIncomeSeries = revenueSeries.map((value, index) => value - (expenseSeries[index] ?? 0))
@@ -324,18 +352,18 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
   const serviceTotals = new Map<number, Map<string, number>>()
 
   for (const row of operations) {
-    const bucket = bucketLabelForDate(row.date, granularity)
-    if (!bucket || !row.service_id) continue
+    const key = bucketKeyForDate(row.date, granularity)
+    if (!key || !row.service_id) continue
     if (!serviceTotals.has(row.service_id)) {
       serviceTotals.set(row.service_id, new Map())
     }
     const totals = serviceTotals.get(row.service_id)!
-    totals.set(bucket, (totals.get(bucket) ?? 0) + Number(row.quantity ?? 0))
+    totals.set(key, (totals.get(key) ?? 0) + Number(row.quantity ?? 0))
   }
 
   for (const service of services) {
     const totals = serviceTotals.get(service.id) ?? new Map<string, number>()
-    serviceSeries.set(service.id, labels.map((label) => totals.get(label) ?? 0))
+    serviceSeries.set(service.id, bucketKeys.map((key) => totals.get(key) ?? 0))
   }
 
   const visibleServiceSeries = new Map<number, number[]>()
@@ -459,17 +487,17 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
 
   const categorySeries = new Map<string, Map<string, number>>()
   for (const row of expenseRows) {
-    const bucket = bucketLabelForDate(row.date, granularity)
-    if (!bucket) continue
+    const key = bucketKeyForDate(row.date, granularity)
+    if (!key) continue
     const bucketMap = categorySeries.get(row.category) ?? new Map<string, number>()
-    bucketMap.set(bucket, (bucketMap.get(bucket) ?? 0) + row.amount)
+    bucketMap.set(key, (bucketMap.get(key) ?? 0) + row.amount)
     categorySeries.set(row.category, bucketMap)
   }
 
   const expenseCategorySeries = Object.fromEntries(
     Array.from(categorySeries.entries()).map(([category, bucketMap]) => [
       category,
-      labels.map((label) => bucketMap.get(label) ?? 0),
+      bucketKeys.map((key) => bucketMap.get(key) ?? 0),
     ])
   )
 
@@ -494,7 +522,7 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
     revenue: Math.max(1000, Math.round((revenueSeries[revenueSeries.length - 1] ?? 0) * 0.12)),
     expense: Math.max(800, Math.round((expenseSeries[expenseSeries.length - 1] ?? 0) * 0.1)),
   }
-  
+
 
   const dailyLog = visibleOperations
     .map((op) => {
@@ -514,15 +542,10 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
     })
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
-  const visibleDailyLog = visibleWindow
-    ? dailyLog.filter((entry) => {
-        const entryDate = new Date(entry.date)
-        if (Number.isNaN(entryDate.getTime())) return false
-        const cutoff = new Date()
-        cutoff.setMonth(cutoff.getMonth() - (visibleWindow === 24 ? 24 : 12))
-        return entryDate >= cutoff
-      })
-    : dailyLog
+  // Previously re-filtered dailyLog against visibleWindow a second time
+  // here. dailyLog is already derived from visibleOperations (already
+  // scoped to the window above), so the second pass was redundant work
+  // that could never change the result — removed.
 
   return {
     months: visibleLabels,
@@ -549,7 +572,7 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
     topServices,
     restockList,
     serviceForecasts,
-    dailyLog: visibleDailyLog,
+    dailyLog,
     expenseBreakdown,
     expenseCategorySeries,
     forecastMethodUsed: 'WMA',
@@ -568,13 +591,48 @@ function buildDashboardDataTag(userId?: string | null, businessId?: string | nul
   return `dashboard-data-${businessId ?? userId ?? 'anonymous'}`
 }
 
+// React's cache() gives genuine single-flight de-duplication *within one
+// request/render pass*: when several Suspense boundaries on the overview
+// page each call getSupabaseDashboardData with the same (userId,
+// businessId, lookbackMonths, displayRange), only one of them actually
+// runs the underlying fetch — the rest reuse that same in-flight/settled
+// promise. This only works reliably because the wrapped function's args
+// are primitives (string/number/null), not a fresh options object per
+// call site — cache() compares args by value, and a new object literal
+// each call would never match another.
+//
+// unstable_cache still sits underneath this for cross-request caching
+// (60s revalidate, tag-based invalidation) — the two are complementary,
+// not redundant: cache() dedupes concurrent calls in one render,
+// unstable_cache persists the result across separate requests.
+const getDashboardDataCached = cache(
+  async (
+    userId: string,
+    businessId: string | null,
+    lookbackMonths: number | null,
+    displayRange: DashboardDataOptions['displayRange']
+  ) => {
+    const cacheKey = ['dashboard-data-v2', userId || businessId || 'anonymous', String(lookbackMonths ?? 12), displayRange ?? 'all']
+    const cached = unstable_cache(
+      (uid: string, opts?: DashboardDataOptions) => getDashboardDataForUser(uid, opts),
+      cacheKey,
+      {
+        revalidate: 60,
+        tags: [buildDashboardDataTag(userId, businessId)],
+      }
+    )
+    return cached(userId, { businessId: businessId ?? undefined, lookbackMonths: lookbackMonths ?? undefined, displayRange })
+  }
+)
+
 export function getSupabaseDashboardData(userId: string, options?: DashboardDataOptions) {
-  const cacheKey = ['dashboard-data-v2', userId ?? options?.businessId ?? 'anonymous', String(options?.lookbackMonths ?? 12), options?.displayRange ?? 'all']
-  const cached = unstable_cache(getDashboardDataForUser, cacheKey, {
-    revalidate: 60,
-    tags: [buildDashboardDataTag(userId, options?.businessId)],
-  })
-  return cached(userId, options)
+  if (options?.client) {
+    // A custom client (tests/scripts) bypasses both cache layers — those
+    // callers want a direct, uncached read against whatever client they
+    // passed in, same as before.
+    return getDashboardDataForUser(userId, options)
+  }
+  return getDashboardDataCached(userId, options?.businessId ?? null, options?.lookbackMonths ?? null, options?.displayRange ?? 'all')
 }
 
 export async function getWeekdayPatterns(userId: string, options?: DashboardDataOptions) {
