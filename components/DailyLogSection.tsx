@@ -43,7 +43,7 @@ function filterDailyLog(rows: DailyLogRow[], span: string) {
 
 export default function DailyLogSection({ dailyLog }: { dailyLog: DailyLogRow[] }) {
   const searchParams = useSearchParams()
-  const currentSpan = searchParams.get('span') || 'all'
+  const currentSpan = searchParams.get('span') || '14'
   const router = useRouter()
 
   const filteredDailyLog = useMemo(

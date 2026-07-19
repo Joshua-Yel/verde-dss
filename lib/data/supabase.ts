@@ -111,6 +111,8 @@ type RawRow = Record<string, unknown>
 interface DashboardDataOptions {
   businessId?: string | null
   client?: typeof supabaseServer
+  displayRange?: '1y' | '2y' | 'all'
+  lookbackMonths?: number
 }
 
 async function getRawRows(client: typeof supabaseServer, businessId: string | null, candidateKeys: string[]) {
@@ -193,6 +195,8 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
   }
 
   const businessId = options?.businessId ?? await resolveBusinessId(client, userId)
+  const lookbackMonths = options?.lookbackMonths ?? null
+  const displayRange = options?.displayRange ?? 'all'
 
   let services: ServiceRow[] = []
   let inventory: InventoryRow[] = []
@@ -273,6 +277,11 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
     })) as InventoryRow[]
   }
 
+  const cutoffDate = typeof lookbackMonths === 'number' && lookbackMonths > 0 ? new Date() : null
+  if (cutoffDate && typeof lookbackMonths === 'number') {
+    cutoffDate.setMonth(cutoffDate.getMonth() - lookbackMonths)
+  }
+
   const expenseRows = rawExpenseRows
     .map((row: RawRow) => {
       const date = normalizeString(row?.date ?? row?.['Date'])
@@ -287,6 +296,9 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
         row?.['price']
       )
       if (!date || !category || amount === null) return null
+      const rowDate = new Date(date)
+      if (cutoffDate && Number.isNaN(rowDate.getTime())) return null
+      if (cutoffDate && rowDate < cutoffDate) return null
       return { date, category, amount }
     })
     .filter((row): row is { date: string; category: string; amount: number } => Boolean(row))
@@ -296,14 +308,17 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
   const range = resolveDateRange(dates)
   const granularity = range.granularity
   const labels = range.labels
-  const months = labels
-
   const revenueSeries = buildSeriesFromOperations(operations, labels, granularity)
   const expenseSeries = expenseRows.length > 0
     ? buildSeriesFromBuckets(expenseRows.map((row) => ({ date: row.date, value: row.amount })), labels, granularity)
     : labels.map(() => 0)
 
   const netIncomeSeries = revenueSeries.map((value, index) => value - (expenseSeries[index] ?? 0))
+  const visibleWindow = displayRange === '1y' ? 12 : displayRange === '2y' ? 24 : null
+  const visibleLabels = visibleWindow ? labels.slice(-visibleWindow) : labels
+  const visibleRevenueSeries = visibleWindow ? revenueSeries.slice(-visibleWindow) : revenueSeries
+  const visibleExpenseSeries = visibleWindow ? expenseSeries.slice(-visibleWindow) : expenseSeries
+  const visibleNetIncomeSeries = visibleWindow ? netIncomeSeries.slice(-visibleWindow) : netIncomeSeries
 
   const serviceSeries = new Map<number, number[]>()
   const serviceTotals = new Map<number, Map<string, number>>()
@@ -323,14 +338,40 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
     serviceSeries.set(service.id, labels.map((label) => totals.get(label) ?? 0))
   }
 
+  const visibleServiceSeries = new Map<number, number[]>()
+  for (const [serviceId, actuals] of serviceSeries.entries()) {
+    visibleServiceSeries.set(serviceId, visibleWindow ? actuals.slice(-visibleWindow) : actuals)
+  }
+
+  const visibleOperations = visibleWindow
+    ? operations.filter((row) => {
+        const rowDate = new Date(row.date)
+        if (Number.isNaN(rowDate.getTime())) return false
+        const cutoff = new Date()
+        cutoff.setMonth(cutoff.getMonth() - visibleWindow)
+        return rowDate >= cutoff
+      })
+    : operations
+
+  const visibleExpenseRows = visibleWindow
+    ? expenseRows.filter((row) => {
+        const rowDate = new Date(row.date)
+        if (Number.isNaN(rowDate.getTime())) return false
+        const cutoff = new Date()
+        cutoff.setMonth(cutoff.getMonth() - visibleWindow)
+        return rowDate >= cutoff
+      })
+    : expenseRows
+
   const serviceForecasts = services.map((service) => {
     const actuals = serviceSeries.get(service.id) ?? []
+    const visibleActuals = visibleServiceSeries.get(service.id) ?? []
     const forecastValuesByModel: Record<ForecastModel, number[]> = {
       wma: forecastSeriesForModel(actuals, 3, Math.min(3, actuals.length), 'wma'),
       sma: forecastSeriesForModel(actuals, 3, Math.min(3, actuals.length), 'sma'),
       naive: forecastSeriesForModel(actuals, 3, Math.min(3, actuals.length), 'naive'),
     }
-    const lastActual = actuals[actuals.length - 1] ?? 0
+    const lastActual = visibleActuals[visibleActuals.length - 1] ?? actuals[actuals.length - 1] ?? 0
     const mapeByModel = Object.fromEntries(
       (Object.entries(forecastValuesByModel) as Array<[ForecastModel, number[]]>).map(([model]) => [model, `${calculateMape(actuals, model, Math.min(3, actuals.length)).toFixed(1)}%`])
     ) as Record<ForecastModel, string>
@@ -433,7 +474,7 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
   )
 
   const expenseBreakdown = Array.from(
-    expenseRows.reduce((map, row) => {
+    visibleExpenseRows.reduce((map, row) => {
       const existing = map.get(row.category) ?? { category: row.category, total: 0, latestAmount: 0 }
       existing.total += row.amount
       existing.latestAmount = row.amount
@@ -442,10 +483,10 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
     }, new Map<string, { category: string; total: number; latestAmount: number }>()).values()
   ).sort((left, right) => right.total - left.total)
 
-  const totalRevenue = revenueSeries.reduce((sum, value) => sum + value, 0)
-  const totalExpenses = expenseRows.reduce((sum, row) => sum + row.amount, 0)
-  const totalSessions = operations.reduce((sum, row) => sum + Number(row.quantity ?? (row.revenue ? 1 : 0)), 0)
-  const activeDays = new Set(operations.map((row) => row.date)).size || Math.max(1, revenueSeries.length)
+  const totalRevenue = visibleRevenueSeries.reduce((sum, value) => sum + value, 0)
+  const totalExpenses = visibleExpenseSeries.reduce((sum, value) => sum + value, 0)
+  const totalSessions = visibleOperations.reduce((sum, row) => sum + Number(row.quantity ?? (row.revenue ? 1 : 0)), 0)
+  const activeDays = new Set(visibleOperations.map((row) => row.date)).size || Math.max(1, visibleRevenueSeries.length)
   const avgDailyRevenue = totalRevenue / activeDays
   const totalNetIncome = totalRevenue - totalExpenses
 
@@ -455,7 +496,7 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
   }
   
 
-  const dailyLog = operations
+  const dailyLog = visibleOperations
     .map((op) => {
       const day = new Date(op.date).toLocaleDateString('en-US', { weekday: 'long' })
       const expenses = Math.round(Number(op.revenue ?? 0) * 0.38)
@@ -473,12 +514,22 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
     })
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
+  const visibleDailyLog = visibleWindow
+    ? dailyLog.filter((entry) => {
+        const entryDate = new Date(entry.date)
+        if (Number.isNaN(entryDate.getTime())) return false
+        const cutoff = new Date()
+        cutoff.setMonth(cutoff.getMonth() - (visibleWindow === 24 ? 24 : 12))
+        return entryDate >= cutoff
+      })
+    : dailyLog
+
   return {
-    months,
-    periodLabels: labels,
-    revenueSeries,
-    expenseSeries,
-    netIncomeSeries,
+    months: visibleLabels,
+    periodLabels: visibleLabels,
+    revenueSeries: visibleRevenueSeries,
+    expenseSeries: visibleExpenseSeries,
+    netIncomeSeries: visibleNetIncomeSeries,
     inventoryItems,
     kpis: {
       projectedRevenue: Math.round(forecastNext),
@@ -498,7 +549,7 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
     topServices,
     restockList,
     serviceForecasts,
-    dailyLog,
+    dailyLog: visibleDailyLog,
     expenseBreakdown,
     expenseCategorySeries,
     forecastMethodUsed: 'WMA',
@@ -518,7 +569,7 @@ function buildDashboardDataTag(userId?: string | null, businessId?: string | nul
 }
 
 export function getSupabaseDashboardData(userId: string, options?: DashboardDataOptions) {
-  const cacheKey = ['dashboard-data-v2', userId ?? options?.businessId ?? 'anonymous']
+  const cacheKey = ['dashboard-data-v2', userId ?? options?.businessId ?? 'anonymous', String(options?.lookbackMonths ?? 12), options?.displayRange ?? 'all']
   const cached = unstable_cache(getDashboardDataForUser, cacheKey, {
     revalidate: 60,
     tags: [buildDashboardDataTag(userId, options?.businessId)],

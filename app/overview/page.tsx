@@ -15,7 +15,24 @@ import {
 export const revalidate = 30;
 
 interface PageProps {
-  searchParams?: Promise<{ span?: string }> | { span?: string } | undefined;
+  searchParams?: Promise<{ span?: string; range?: string }> | { span?: string; range?: string } | undefined;
+}
+
+type OverviewRange = '12m' | '24m' | 'all';
+
+type DashboardDisplayRange = '1y' | '2y' | 'all';
+
+function resolveOverviewRange(searchParams: { range?: string } | undefined): OverviewRange {
+  const rawRange = searchParams?.range;
+  if (rawRange === '24m') return '24m';
+  if (rawRange === 'all') return 'all';
+  return '12m';
+}
+
+function resolveDisplayRange(range: OverviewRange): DashboardDisplayRange {
+  if (range === '24m') return '2y';
+  if (range === 'all') return 'all';
+  return '1y';
 }
 
 export default async function OverviewPage({ searchParams }: PageProps) {
@@ -23,6 +40,8 @@ export default async function OverviewPage({ searchParams }: PageProps) {
     searchParams && typeof searchParams === 'object' && 'then' in searchParams
       ? await searchParams
       : searchParams || {};
+
+  const range = resolveOverviewRange(searchParamsObject);
 
   return (
     <div className="space-y-6 mx-auto p-4 md:p-6 text-foreground bg-background transition-colors duration-200">
@@ -35,14 +54,21 @@ export default async function OverviewPage({ searchParams }: PageProps) {
             Overview
           </div>
           <h1 className="font-display text-2xl md:text-3xl font-semibold tracking-tight">Operations Overview</h1>
-          <Suspense fallback={<p className="text-xs text-muted-foreground leading-relaxed max-w-xl">Financial trends, operational metrics, and predictive insights.</p>}>
-            <OverviewSubheading />
-          </Suspense>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <Suspense fallback={<p className="text-xs text-muted-foreground leading-relaxed max-w-xl">Financial trends, operational metrics, and predictive insights.</p>}>
+              <OverviewSubheading range={range} />
+            </Suspense>
+            <div className="inline-flex rounded-lg border border-border bg-card p-1 shadow-sm">
+              <RangePill href="/overview?range=12m" active={range === '12m'}>Last year</RangePill>
+              <RangePill href="/overview?range=24m" active={range === '24m'}>Last 2 years</RangePill>
+              <RangePill href="/overview?range=all" active={range === 'all'}>All records</RangePill>
+            </div>
+          </div>
         </div>
 
         {/* Dynamic KPI Rows Injection Point */}
         <Suspense fallback={<KpiRowSkeleton />}>
-          <KpiSection />
+          <KpiSection range={range} />
         </Suspense>
       </div>
 
@@ -50,27 +76,37 @@ export default async function OverviewPage({ searchParams }: PageProps) {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
         <div className="lg:col-span-7 xl:col-span-7">
           <Suspense fallback={<ChartCardSkeleton height={340} />}>
-            <RevenueChartSection />
+            <RevenueChartSection range={range} />
           </Suspense>
         </div>
 
         <div className="lg:col-span-5 xl:col-span-5">
           <Suspense fallback={<ChartCardSkeleton height={340} />}>
-            <RevenueByServiceSection />
+            <RevenueByServiceSection range={range} />
           </Suspense>
         </div>
       </div>
 
       {/* HISTORICAL WORKLOG STREAMS */}
       <Suspense fallback={<TableCardSkeleton />}>
-        <DailyLogStreamSection />
+        <DailyLogStreamSection range={range} />
       </Suspense>
-
     </div>
   );
 }
 
-async function OverviewSubheading() {
+function RangePill({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+    >
+      {children}
+    </a>
+  );
+}
+
+async function OverviewSubheading({ range }: { range: OverviewRange }) {
   // Previously this was a hardcoded "Jan – May 2025" string, disconnected
   // from the actual imported data. If the underlying date range changes
   // (new imports, different months), the header would silently keep
@@ -78,7 +114,10 @@ async function OverviewSubheading() {
   // class of bug entirely — this call is deduped with every other
   // getX() call on this page via the cache() wrap in lib/data/supabase.ts,
   // so it doesn't add an extra round-trip.
-  const summary = await getFinancialSummary();
+  const summary = await getFinancialSummary({
+    lookbackMonths: range === 'all' ? undefined : range === '24m' ? 24 : 12,
+    displayRange: resolveDisplayRange(range),
+  });
   const labels = summary.periodLabels ?? [];
   const rangeText = labels.length > 0
     ? labels.length === 1
@@ -93,8 +132,11 @@ async function OverviewSubheading() {
   );
 }
 
-async function KpiSection() {
-  const kpis = await getKPIsOverview();
+async function KpiSection({ range }: { range: OverviewRange }) {
+  const kpis = await getKPIsOverview({
+    lookbackMonths: range === 'all' ? undefined : range === '24m' ? 24 : 12,
+    displayRange: resolveDisplayRange(range),
+  });
   
   const totalSessions = Number(kpis.totalSessions ?? 0);
   const totalRevenue = Number(kpis.totalRevenue ?? 0);
@@ -248,9 +290,15 @@ async function KpiSection() {
   );
 }
 
-async function RevenueChartSection() {
-  const revenue = await getRevenueSeries();
-  const labels = await getMonths();
+async function RevenueChartSection({ range }: { range: OverviewRange }) {
+  const revenue = await getRevenueSeries({
+    lookbackMonths: range === 'all' ? undefined : range === '24m' ? 24 : 12,
+    displayRange: resolveDisplayRange(range),
+  });
+  const labels = await getMonths({
+    lookbackMonths: range === 'all' ? undefined : range === '24m' ? 24 : 12,
+    displayRange: resolveDisplayRange(range),
+  });
 
   return (
     <div className="h-full p-6 rounded-xl border border-border bg-card shadow-2xs flex flex-col justify-between">
@@ -302,8 +350,11 @@ async function RevenueChartSection() {
   );
 }
 
-async function RevenueByServiceSection() {
-  const svcTable = await getServicesForecastTable();
+async function RevenueByServiceSection({ range }: { range: OverviewRange }) {
+  const svcTable = await getServicesForecastTable({
+    lookbackMonths: range === 'all' ? undefined : range === '24m' ? 24 : 12,
+    displayRange: resolveDisplayRange(range),
+  });
 
   return (
     <div className="h-full p-6 rounded-xl border border-border bg-card shadow-2xs flex flex-col">
@@ -330,8 +381,11 @@ async function RevenueByServiceSection() {
   );
 }
 
-async function DailyLogStreamSection() {
-  const dailyLog = await getDailyLog();
+async function DailyLogStreamSection({ range }: { range: OverviewRange }) {
+  const dailyLog = await getDailyLog({
+    lookbackMonths: range === 'all' ? undefined : range === '24m' ? 24 : 12,
+    displayRange: resolveDisplayRange(range),
+  });
 
   return <DailyLogSection dailyLog={dailyLog} />;
 }

@@ -43,15 +43,15 @@ const buildAriaContextSummary = unstable_cache(
     }
 
     const [kpis, revenueSeries, svcTable, restockList, dailyLog, financialSeries, inventoryItems, weekdayPatterns, serviceByWeekday] = await Promise.all([
-      getKPIsOverview({ businessId }),
-      getRevenueSeries({ businessId }),
-      getServicesForecastTable({ businessId }),
-      getRestockList({ businessId }),
-      getDailyLog({ businessId }),
-      getFinancialSummary({ businessId }),
-      getInventoryItems({ businessId }),
-      getWeekdayPatternsData({ businessId }),
-      getServiceByWeekdayData({ businessId }),
+      getKPIsOverview({ businessId, lookbackMonths: 12 }),
+      getRevenueSeries({ businessId, lookbackMonths: 12 }),
+      getServicesForecastTable({ businessId, lookbackMonths: 12 }),
+      getRestockList({ businessId, lookbackMonths: 12 }),
+      getDailyLog({ businessId, lookbackMonths: 12 }),
+      getFinancialSummary({ businessId, lookbackMonths: 12 }),
+      getInventoryItems({ businessId, lookbackMonths: 12 }),
+      getWeekdayPatternsData({ businessId, lookbackMonths: 12 }),
+      getServiceByWeekdayData({ businessId, lookbackMonths: 12 }),
     ]);
 
     const totalProjectedVolume = svcTable.reduce((sum, service) => sum + Math.round(service.forecasts[0] || 0), 0);

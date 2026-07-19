@@ -57,6 +57,50 @@ test("Admin usage tracking uses a writable temp path in Vercel-style environment
   assert.match(source, /tmpdir|os\.tmpdir|VERCEL|NEXT_RUNTIME/i);
 });
 
+test("Overview page defaults to a recent lookback window for dashboard data", () => {
+  const overviewPagePath = path.join(
+    __dirname,
+    "..",
+    "app",
+    "overview",
+    "page.tsx",
+  );
+  const source = fs.readFileSync(overviewPagePath, "utf8");
+
+  assert.match(
+    source,
+    /lookbackMonths:\s*range === 'all' \? undefined : range === '24m' \? 24 : 12/i,
+  );
+});
+
+test("Overview page exposes range selection for last year, last 2 years, and all records", () => {
+  const overviewPagePath = path.join(
+    __dirname,
+    "..",
+    "app",
+    "overview",
+    "page.tsx",
+  );
+  const source = fs.readFileSync(overviewPagePath, "utf8");
+
+  assert.match(source, /Last year/i);
+  assert.match(source, /Last 2 years/i);
+  assert.match(source, /All records/i);
+});
+
+test("AIRA context summary uses a recent lookback window for faster responses", () => {
+  const ariaContextPath = path.join(
+    __dirname,
+    "..",
+    "src",
+    "lib",
+    "ariaContext.ts",
+  );
+  const source = fs.readFileSync(ariaContextPath, "utf8");
+
+  assert.match(source, /lookbackMonths:\s*12/i);
+});
+
 test("AIRA evaluation suite covers the requested languages and intents", () => {
   assert.ok(Array.isArray(AIRA_TEST_SUITE) && AIRA_TEST_SUITE.length >= 11);
 
