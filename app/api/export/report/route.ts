@@ -20,6 +20,20 @@ import {
 
 type KpiUnit = 'currency' | 'percent' | 'count';
 
+// Keep these ids in sync with the SECTIONS list in components/ExportModal.tsx
+type ExportSection = 'overview' | 'service-demand' | 'inventory' | 'financials' | 'staffing';
+const ALL_SECTIONS: ExportSection[] = ['overview', 'service-demand', 'inventory', 'financials', 'staffing'];
+
+function parseSections(raw: string | null): ExportSection[] {
+  if (!raw) return ALL_SECTIONS;
+  const requested = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean) as ExportSection[];
+  const valid = requested.filter((s): s is ExportSection => (ALL_SECTIONS as string[]).includes(s));
+  return valid.length > 0 ? valid : ALL_SECTIONS;
+}
+
 interface ReportKpiRow {
   metric: string;
   unit: KpiUnit;
@@ -68,6 +82,7 @@ interface ReportPayload {
   pathname: string;
   forecastMethodUsed: string;
   executiveSummary: string;
+  sections: ExportSection[];
   kpis: ReportKpiRow[];
   forecastRows: ForecastRow[];
   inventoryItems: InventoryItemRow[];
@@ -328,6 +343,7 @@ class PdfReportBuilder {
 
   /** Grid of KPI cards, e.g. 2 columns x N rows, each with a label/value/subline. */
   drawKpiGrid(cards: Array<{ label: string; value: string; sub: string; alert?: boolean }>, columns = 2) {
+    if (cards.length === 0) return;
     const gap = 10;
     const cardWidth = (CONTENT_WIDTH - gap * (columns - 1)) / columns;
     const cardHeight = 52;
@@ -506,94 +522,104 @@ async function buildPdfDocument(payload: ReportPayload): Promise<Uint8Array> {
   builder.drawParagraph(payload.executiveSummary);
   builder.drawSpacer(6);
 
-  builder.drawSectionTitle('Key Performance Indicators');
-  builder.drawKpiGrid(
-    payload.kpis.map((row) => ({
-      label: row.metric,
-      value: formatKpiValue(row.unit, row.current),
-      sub:
-        row.previous !== null
-          ? `Prev: ${formatKpiValue(row.unit, row.previous)}${row.changePct !== null ? `  (${row.changePct >= 0 ? '+' : ''}${row.changePct.toFixed(1)}%)` : ''}`
-          : row.interpretation,
-      alert: row.metric === 'Urgent Inventory Items' && row.current > 0,
-    })),
-    2
-  );
-  builder.drawSpacer(8);
+  if (payload.kpis.length > 0) {
+    builder.drawSectionTitle('Key Performance Indicators');
+    builder.drawKpiGrid(
+      payload.kpis.map((row) => ({
+        label: row.metric,
+        value: formatKpiValue(row.unit, row.current),
+        sub:
+          row.previous !== null
+            ? `Prev: ${formatKpiValue(row.unit, row.previous)}${row.changePct !== null ? `  (${row.changePct >= 0 ? '+' : ''}${row.changePct.toFixed(1)}%)` : ''}`
+            : row.interpretation,
+        alert: row.metric === 'Urgent Inventory Items' && row.current > 0,
+      })),
+      2
+    );
+    builder.drawSpacer(8);
+  }
 
-  builder.drawSectionTitle('Service Demand Forecast');
-  builder.drawTable(
-    [
-      { header: 'SERVICE', width: 150 },
-      { header: 'CATEGORY', width: 100 },
-      { header: 'BOOKINGS', width: 62, align: 'right' },
-      { header: 'MAPE', width: 52, align: 'right' },
-      { header: 'METHOD', width: 90 },
-      { header: 'NEXT-PERIOD FORECAST', width: CONTENT_WIDTH - 150 - 100 - 62 - 52 - 90 },
-    ],
-    payload.forecastRows
-      .slice(0, 20)
-      .map((row) => [row.service, row.category, String(row.bookings), row.mape, row.forecastMethod, row.forecasts])
-  );
+  if (payload.sections.includes('service-demand')) {
+    builder.drawSectionTitle('Service Demand Forecast');
+    builder.drawTable(
+      [
+        { header: 'SERVICE', width: 150 },
+        { header: 'CATEGORY', width: 100 },
+        { header: 'BOOKINGS', width: 62, align: 'right' },
+        { header: 'MAPE', width: 52, align: 'right' },
+        { header: 'METHOD', width: 90 },
+        { header: 'NEXT-PERIOD FORECAST', width: CONTENT_WIDTH - 150 - 100 - 62 - 52 - 90 },
+      ],
+      payload.forecastRows
+        .slice(0, 20)
+        .map((row) => [row.service, row.category, String(row.bookings), row.mape, row.forecastMethod, row.forecasts])
+    );
+  }
 
-  builder.drawSectionTitle('Inventory Status');
-  const statusColor = (status: string): RGB => {
-    if (status === 'Critical') return COLOR.alertRed;
-    if (status === 'Low') return COLOR.warnAmber;
-    return COLOR.okGreen;
-  };
-  builder.drawTable(
-    [
-      { header: 'ITEM', width: 140 },
-      { header: 'SUPPLIER', width: 110 },
-      { header: 'STOCK', width: 55, align: 'right' },
-      { header: 'REORDER PT', width: 65, align: 'right' },
-      { header: 'DAYS COVER', width: 68, align: 'right' },
-      { header: 'STATUS', width: CONTENT_WIDTH - 140 - 110 - 55 - 65 - 68 },
-    ],
-    payload.inventoryItems
-      .slice(0, 30)
-      .map((item) => [
-        item.name,
-        item.supplier ?? '—',
-        String(item.stock),
-        String(item.reorderPoint),
-        Number.isFinite(item.daysOfCover) ? String(Math.round(item.daysOfCover)) : '—',
-        item.status,
-      ]),
-    {
-      rowFill: (_i, row) => (row[5] === 'Critical' ? COLOR.alertRedBg : null),
-      cellTextColor: (_i, colIndex, row) => (colIndex === 5 ? statusColor(row[5]) : COLOR.text),
-    }
-  );
+  if (payload.sections.includes('inventory')) {
+    builder.drawSectionTitle('Inventory Status');
+    const statusColor = (status: string): RGB => {
+      if (status === 'Critical') return COLOR.alertRed;
+      if (status === 'Low') return COLOR.warnAmber;
+      return COLOR.okGreen;
+    };
+    builder.drawTable(
+      [
+        { header: 'ITEM', width: 140 },
+        { header: 'SUPPLIER', width: 110 },
+        { header: 'STOCK', width: 55, align: 'right' },
+        { header: 'REORDER PT', width: 65, align: 'right' },
+        { header: 'DAYS COVER', width: 68, align: 'right' },
+        { header: 'STATUS', width: CONTENT_WIDTH - 140 - 110 - 55 - 65 - 68 },
+      ],
+      payload.inventoryItems
+        .slice(0, 30)
+        .map((item) => [
+          item.name,
+          item.supplier ?? '—',
+          String(item.stock),
+          String(item.reorderPoint),
+          Number.isFinite(item.daysOfCover) ? String(Math.round(item.daysOfCover)) : '—',
+          item.status,
+        ]),
+      {
+        rowFill: (_i, row) => (row[5] === 'Critical' ? COLOR.alertRedBg : null),
+        cellTextColor: (_i, colIndex, row) => (colIndex === 5 ? statusColor(row[5]) : COLOR.text),
+      }
+    );
+  }
 
-  builder.drawSectionTitle('Expense Breakdown');
-  builder.drawTable(
-    [
-      { header: 'CATEGORY', width: 220 },
-      { header: 'TOTAL', width: (CONTENT_WIDTH - 220) / 2, align: 'right' },
-      { header: 'LATEST AMOUNT', width: (CONTENT_WIDTH - 220) / 2, align: 'right' },
-    ],
-    payload.expenseBreakdown.map((item) => [item.category, formatCurrency(item.total), formatCurrency(item.latestAmount)])
-  );
+  if (payload.sections.includes('financials')) {
+    builder.drawSectionTitle('Expense Breakdown');
+    builder.drawTable(
+      [
+        { header: 'CATEGORY', width: 220 },
+        { header: 'TOTAL', width: (CONTENT_WIDTH - 220) / 2, align: 'right' },
+        { header: 'LATEST AMOUNT', width: (CONTENT_WIDTH - 220) / 2, align: 'right' },
+      ],
+      payload.expenseBreakdown.map((item) => [item.category, formatCurrency(item.total), formatCurrency(item.latestAmount)])
+    );
+  }
 
-  builder.drawSectionTitle('Staffing Recommendations');
-  builder.drawTable(
-    [
-      { header: 'DAY', width: 110 },
-      { header: 'REVENUE', width: 110, align: 'right' },
-      { header: 'SESSIONS', width: 80, align: 'right' },
-      { header: 'DEMAND', width: 90 },
-      { header: 'RECOMMENDED STAFF', width: CONTENT_WIDTH - 110 - 110 - 80 - 90, align: 'right' },
-    ],
-    payload.weekdayPatterns.map((row) => [
-      row.day,
-      formatCurrency(row.revenue),
-      String(row.sessions),
-      row.demandLevel ?? '—',
-      row.recommendedStaff !== undefined ? String(row.recommendedStaff) : '—',
-    ])
-  );
+  if (payload.sections.includes('staffing')) {
+    builder.drawSectionTitle('Staffing Recommendations');
+    builder.drawTable(
+      [
+        { header: 'DAY', width: 110 },
+        { header: 'REVENUE', width: 110, align: 'right' },
+        { header: 'SESSIONS', width: 80, align: 'right' },
+        { header: 'DEMAND', width: 90 },
+        { header: 'RECOMMENDED STAFF', width: CONTENT_WIDTH - 110 - 110 - 80 - 90, align: 'right' },
+      ],
+      payload.weekdayPatterns.map((row) => [
+        row.day,
+        formatCurrency(row.revenue),
+        String(row.sessions),
+        row.demandLevel ?? '—',
+        row.recommendedStaff !== undefined ? String(row.recommendedStaff) : '—',
+      ])
+    );
+  }
 
   builder.drawSectionTitle('Methodology & Limitations');
   builder.drawBulletList([
@@ -672,6 +698,7 @@ async function buildWorkbook(payload: ReportPayload): Promise<ExcelJS.Workbook> 
   const summaryFields: Array<[string, string]> = [
     ['Forecast Method', payload.forecastMethodUsed],
     ['Report Period', payload.periodLabels.length > 0 ? `${payload.periodLabels[0]} – ${payload.periodLabels[payload.periodLabels.length - 1]}` : 'No data'],
+    ['Sections Included', payload.sections.join(', ')],
   ];
   for (const [label, value] of summaryFields) {
     const row = summary.addRow([label, value]);
@@ -686,114 +713,126 @@ async function buildWorkbook(payload: ReportPayload): Promise<ExcelJS.Workbook> 
   summary.getRow(execRow.number).height = 60;
 
   // --- KPIs sheet --------------------------------------------------------
-  const kpiSheet = workbook.addWorksheet('KPIs');
-  const kpiHeader = kpiSheet.addRow(['Metric', 'Current', 'Previous', 'Change %', 'Interpretation']);
-  styleHeaderRow(kpiHeader);
-  for (const row of payload.kpis) {
-    const excelRow = kpiSheet.addRow([
-      row.metric,
-      row.current,
-      row.previous,
-      row.changePct !== null ? row.changePct / 100 : null,
-      row.interpretation,
-    ]);
-    const fmt = row.unit === 'currency' ? CURRENCY_FMT : row.unit === 'percent' ? '0.0"%"' : '#,##0';
-    excelRow.getCell(2).numFmt = fmt;
-    if (row.previous !== null) excelRow.getCell(3).numFmt = fmt;
-    if (row.changePct !== null) {
-      excelRow.getCell(4).numFmt = '+0.0%;-0.0%';
-      excelRow.getCell(4).font = { color: { argb: row.changePct >= 0 ? 'FF1E7A3F' : 'FFB81E1E' } };
+  if (payload.kpis.length > 0) {
+    const kpiSheet = workbook.addWorksheet('KPIs');
+    const kpiHeader = kpiSheet.addRow(['Metric', 'Current', 'Previous', 'Change %', 'Interpretation']);
+    styleHeaderRow(kpiHeader);
+    for (const row of payload.kpis) {
+      const excelRow = kpiSheet.addRow([
+        row.metric,
+        row.current,
+        row.previous,
+        row.changePct !== null ? row.changePct / 100 : null,
+        row.interpretation,
+      ]);
+      const fmt = row.unit === 'currency' ? CURRENCY_FMT : row.unit === 'percent' ? '0.0"%"' : '#,##0';
+      excelRow.getCell(2).numFmt = fmt;
+      if (row.previous !== null) excelRow.getCell(3).numFmt = fmt;
+      if (row.changePct !== null) {
+        excelRow.getCell(4).numFmt = '+0.0%;-0.0%';
+        excelRow.getCell(4).font = { color: { argb: row.changePct >= 0 ? 'FF1E7A3F' : 'FFB81E1E' } };
+      }
     }
+    kpiSheet.views = [{ state: 'frozen', ySplit: 1 }];
+    kpiSheet.autoFilter = { from: 'A1', to: 'E1' };
+    autoSizeColumns(kpiSheet);
   }
-  kpiSheet.views = [{ state: 'frozen', ySplit: 1 }];
-  kpiSheet.autoFilter = { from: 'A1', to: 'E1' };
-  autoSizeColumns(kpiSheet);
 
-  // --- Historical Data sheet ----------------------------------------------
-  const historySheet = workbook.addWorksheet('Historical Data');
-  const historyHeader = historySheet.addRow(['Period', 'Revenue', 'Expenses', 'Net Income']);
-  styleHeaderRow(historyHeader);
-  payload.periodLabels.forEach((label, index) => {
-    const row = historySheet.addRow([
-      label,
-      payload.revenueSeries[index] ?? 0,
-      payload.expenseSeries[index] ?? 0,
-      payload.netIncomeSeries[index] ?? 0,
-    ]);
-    [2, 3, 4].forEach((col) => (row.getCell(col).numFmt = CURRENCY_FMT));
-    if ((payload.netIncomeSeries[index] ?? 0) < 0) {
-      row.getCell(4).font = { color: { argb: 'FFB81E1E' } };
-    }
-  });
-  historySheet.views = [{ state: 'frozen', ySplit: 1 }];
-  historySheet.autoFilter = { from: 'A1', to: 'D1' };
-  autoSizeColumns(historySheet);
+  // --- Historical Data sheet (overview) ----------------------------------
+  if (payload.sections.includes('overview')) {
+    const historySheet = workbook.addWorksheet('Historical Data');
+    const historyHeader = historySheet.addRow(['Period', 'Revenue', 'Expenses', 'Net Income']);
+    styleHeaderRow(historyHeader);
+    payload.periodLabels.forEach((label, index) => {
+      const row = historySheet.addRow([
+        label,
+        payload.revenueSeries[index] ?? 0,
+        payload.expenseSeries[index] ?? 0,
+        payload.netIncomeSeries[index] ?? 0,
+      ]);
+      [2, 3, 4].forEach((col) => (row.getCell(col).numFmt = CURRENCY_FMT));
+      if ((payload.netIncomeSeries[index] ?? 0) < 0) {
+        row.getCell(4).font = { color: { argb: 'FFB81E1E' } };
+      }
+    });
+    historySheet.views = [{ state: 'frozen', ySplit: 1 }];
+    historySheet.autoFilter = { from: 'A1', to: 'D1' };
+    autoSizeColumns(historySheet);
+  }
 
   // --- Forecasts sheet -----------------------------------------------------
-  const forecastSheet = workbook.addWorksheet('Forecasts');
-  const forecastHeader = forecastSheet.addRow(['Service', 'Category', 'Bookings', 'MAPE', 'Forecast Method', 'Forecast Values']);
-  styleHeaderRow(forecastHeader);
-  for (const row of payload.forecastRows) {
-    forecastSheet.addRow([row.service, row.category, row.bookings, row.mape, row.forecastMethod, row.forecasts]);
+  if (payload.sections.includes('service-demand')) {
+    const forecastSheet = workbook.addWorksheet('Forecasts');
+    const forecastHeader = forecastSheet.addRow(['Service', 'Category', 'Bookings', 'MAPE', 'Forecast Method', 'Forecast Values']);
+    styleHeaderRow(forecastHeader);
+    for (const row of payload.forecastRows) {
+      forecastSheet.addRow([row.service, row.category, row.bookings, row.mape, row.forecastMethod, row.forecasts]);
+    }
+    forecastSheet.views = [{ state: 'frozen', ySplit: 1 }];
+    forecastSheet.autoFilter = { from: 'A1', to: 'F1' };
+    autoSizeColumns(forecastSheet);
   }
-  forecastSheet.views = [{ state: 'frozen', ySplit: 1 }];
-  forecastSheet.autoFilter = { from: 'A1', to: 'F1' };
-  autoSizeColumns(forecastSheet);
 
   // --- Inventory sheet -------------------------------------------------------
-  const inventorySheet = workbook.addWorksheet('Inventory');
-  const inventoryHeader = inventorySheet.addRow(['Item', 'Stock', 'Reorder Point', 'Days of Cover', 'Status', 'Supplier', 'Reorder Quantity']);
-  styleHeaderRow(inventoryHeader);
-  for (const item of payload.inventoryItems) {
-    const row = inventorySheet.addRow([
-      item.name,
-      item.stock,
-      item.reorderPoint,
-      Number.isFinite(item.daysOfCover) ? item.daysOfCover : null,
-      item.status,
-      item.supplier ?? '',
-      item.reorderQuantity ?? 0,
-    ]);
-    if (item.status === 'Critical') {
-      row.eachCell((cell) => {
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ALERT_ARGB } };
-      });
-      row.getCell(5).font = { bold: true, color: { argb: 'FFB81E1E' } };
-    } else if (item.status === 'Low') {
-      row.getCell(5).font = { bold: true, color: { argb: 'FF9E6B0A' } };
+  if (payload.sections.includes('inventory')) {
+    const inventorySheet = workbook.addWorksheet('Inventory');
+    const inventoryHeader = inventorySheet.addRow(['Item', 'Stock', 'Reorder Point', 'Days of Cover', 'Status', 'Supplier', 'Reorder Quantity']);
+    styleHeaderRow(inventoryHeader);
+    for (const item of payload.inventoryItems) {
+      const row = inventorySheet.addRow([
+        item.name,
+        item.stock,
+        item.reorderPoint,
+        Number.isFinite(item.daysOfCover) ? item.daysOfCover : null,
+        item.status,
+        item.supplier ?? '',
+        item.reorderQuantity ?? 0,
+      ]);
+      if (item.status === 'Critical') {
+        row.eachCell((cell) => {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ALERT_ARGB } };
+        });
+        row.getCell(5).font = { bold: true, color: { argb: 'FFB81E1E' } };
+      } else if (item.status === 'Low') {
+        row.getCell(5).font = { bold: true, color: { argb: 'FF9E6B0A' } };
+      }
     }
+    inventorySheet.views = [{ state: 'frozen', ySplit: 1 }];
+    inventorySheet.autoFilter = { from: 'A1', to: 'G1' };
+    autoSizeColumns(inventorySheet);
   }
-  inventorySheet.views = [{ state: 'frozen', ySplit: 1 }];
-  inventorySheet.autoFilter = { from: 'A1', to: 'G1' };
-  autoSizeColumns(inventorySheet);
 
   // --- Financials sheet --------------------------------------------------
-  const financialSheet = workbook.addWorksheet('Financials');
-  const financialHeader = financialSheet.addRow(['Category', 'Total', 'Latest Amount']);
-  styleHeaderRow(financialHeader);
-  for (const item of payload.expenseBreakdown) {
-    const row = financialSheet.addRow([item.category, item.total, item.latestAmount]);
-    row.getCell(2).numFmt = CURRENCY_FMT;
-    row.getCell(3).numFmt = CURRENCY_FMT;
+  if (payload.sections.includes('financials')) {
+    const financialSheet = workbook.addWorksheet('Financials');
+    const financialHeader = financialSheet.addRow(['Category', 'Total', 'Latest Amount']);
+    styleHeaderRow(financialHeader);
+    for (const item of payload.expenseBreakdown) {
+      const row = financialSheet.addRow([item.category, item.total, item.latestAmount]);
+      row.getCell(2).numFmt = CURRENCY_FMT;
+      row.getCell(3).numFmt = CURRENCY_FMT;
+    }
+    financialSheet.views = [{ state: 'frozen', ySplit: 1 }];
+    financialSheet.autoFilter = { from: 'A1', to: 'C1' };
+    autoSizeColumns(financialSheet);
   }
-  financialSheet.views = [{ state: 'frozen', ySplit: 1 }];
-  financialSheet.autoFilter = { from: 'A1', to: 'C1' };
-  autoSizeColumns(financialSheet);
 
   // --- Staffing sheet ------------------------------------------------------
-  const staffingSheet = workbook.addWorksheet('Staffing');
-  const staffingHeader = staffingSheet.addRow(['Day', 'Revenue', 'Sessions', 'Demand Level', 'Recommended Staff']);
-  styleHeaderRow(staffingHeader);
-  for (const row of payload.weekdayPatterns) {
-    const excelRow = staffingSheet.addRow([row.day, row.revenue, row.sessions, row.demandLevel ?? '', row.recommendedStaff ?? 0]);
-    excelRow.getCell(2).numFmt = CURRENCY_FMT;
+  if (payload.sections.includes('staffing')) {
+    const staffingSheet = workbook.addWorksheet('Staffing');
+    const staffingHeader = staffingSheet.addRow(['Day', 'Revenue', 'Sessions', 'Demand Level', 'Recommended Staff']);
+    styleHeaderRow(staffingHeader);
+    for (const row of payload.weekdayPatterns) {
+      const excelRow = staffingSheet.addRow([row.day, row.revenue, row.sessions, row.demandLevel ?? '', row.recommendedStaff ?? 0]);
+      excelRow.getCell(2).numFmt = CURRENCY_FMT;
+    }
+    staffingSheet.views = [{ state: 'frozen', ySplit: 1 }];
+    staffingSheet.autoFilter = { from: 'A1', to: 'E1' };
+    autoSizeColumns(staffingSheet);
   }
-  staffingSheet.views = [{ state: 'frozen', ySplit: 1 }];
-  staffingSheet.autoFilter = { from: 'A1', to: 'E1' };
-  autoSizeColumns(staffingSheet);
 
-  // --- Daily Log sheet (replaces the old near-empty "Raw Data" sheet) ------
-  if (payload.dailyLog.length > 0) {
+  // --- Daily Log sheet (financials; replaces the old near-empty "Raw Data" sheet) ---
+  if (payload.sections.includes('financials') && payload.dailyLog.length > 0) {
     const logSheet = workbook.addWorksheet('Daily Log');
     const sampleKeys = Object.keys(payload.dailyLog[0]);
     const headerRow = logSheet.addRow(sampleKeys.map((key) => key.charAt(0).toUpperCase() + key.slice(1)));
@@ -825,25 +864,35 @@ export async function GET(req: NextRequest) {
     const format = requestedFormat === 'excel' ? 'excel' : 'pdf';
     const pathname = searchParams.get('path') || '/overview';
     const reportTitle = searchParams.get('title') || inferReportTitle(pathname);
+    const sections = parseSections(searchParams.get('sections'));
     const generatedAt = new Date().toLocaleString('en-PH', {
       dateStyle: 'medium',
       timeStyle: 'short',
     });
 
-    // These independently call getSupabaseDashboardData({businessId}), but
-    // that function is wrapped in React's cache() (see lib/data/supabase.ts),
-    // so within this single request they collapse into ONE underlying
-    // Supabase fetch sequence rather than nine.
+    const wantsOverview = sections.includes('overview');
+    const wantsServiceDemand = sections.includes('service-demand');
+    const wantsInventory = sections.includes('inventory');
+    const wantsFinancials = sections.includes('financials');
+    const wantsStaffing = sections.includes('staffing');
+
+    // getKPIsOverview / getRevenueSeries / getFinancialSummary are always
+    // fetched — they underpin the header, executive summary, period labels,
+    // and methodology text regardless of which tabs were picked. They also
+    // all call getSupabaseDashboardData({businessId}) which is wrapped in
+    // React's cache(), so within this single request they collapse into ONE
+    // underlying Supabase fetch sequence rather than several. The heavier,
+    // section-specific getters are only fetched when their tab is selected.
     const reportData = await Promise.all([
       getKPIsOverview({ businessId }),
       getRevenueSeries({ businessId }),
-      getServicesForecastTable({ businessId }),
-      getDailyLog({ businessId }),
+      wantsServiceDemand ? getServicesForecastTable({ businessId }) : Promise.resolve([]),
+      wantsFinancials ? getDailyLog({ businessId }) : Promise.resolve([]),
       getFinancialSummary({ businessId }),
-      getInventoryItems({ businessId }),
-      getWeekdayPatternsData({ businessId }),
-      getExpenseCategoryBreakdownData({ businessId }),
-      getInventoryConsumptionSignalData({ businessId }),
+      wantsInventory ? getInventoryItems({ businessId }) : Promise.resolve([]),
+      wantsStaffing ? getWeekdayPatternsData({ businessId }) : Promise.resolve([]),
+      wantsFinancials ? getExpenseCategoryBreakdownData({ businessId }) : Promise.resolve([]),
+      wantsInventory ? getInventoryConsumptionSignalData({ businessId }) : Promise.resolve([]),
     ]);
 
     const [
@@ -881,48 +930,56 @@ export async function GET(req: NextRequest) {
       : 0;
     const urgentInventoryCount = normalizedInventoryItems.filter((item) => item.status === 'Critical').length;
 
-    const kpiRows: ReportKpiRow[] = [
-      {
+    // Only include KPI cards for the sections that were actually requested.
+    const kpiRows: ReportKpiRow[] = [];
+    if (wantsOverview) {
+      kpiRows.push({
         metric: 'Projected Revenue',
         unit: 'currency',
         current: Number(kpis.projectedRevenue ?? 0),
         previous: previousRevenue,
         changePct: Number(kpis.projectedPct ?? 0),
         interpretation: 'Forecasted revenue for the next period based on the active model.',
-      },
-      {
+      });
+      kpiRows.push({
         metric: 'Revenue Change',
         unit: 'currency',
         current: latestRevenue,
         previous: previousRevenue,
         changePct: revenueChange,
         interpretation: 'Shows whether recent revenue performance is improving or weakening.',
-      },
-      {
+      });
+    }
+    if (wantsFinancials) {
+      kpiRows.push({
         metric: 'Expense Change',
         unit: 'currency',
         current: latestExpense,
         previous: previousExpense,
         changePct: expenseChange,
         interpretation: 'Tracks whether operating costs are rising faster than revenue.',
-      },
-      {
+      });
+    }
+    if (wantsInventory) {
+      kpiRows.push({
         metric: 'Urgent Inventory Items',
         unit: 'count',
         current: urgentInventoryCount,
         previous: null,
         changePct: null,
         interpretation: 'Highlights stock positions that need immediate management attention.',
-      },
-      {
+      });
+    }
+    if (wantsServiceDemand) {
+      kpiRows.push({
         metric: 'Average Forecast Error',
         unit: 'percent',
         current: avgMape,
         previous: null,
         changePct: null,
         interpretation: 'Indicates how far forecasts are expected to deviate from realized outcomes.',
-      },
-    ];
+      });
+    }
 
     const forecastRows: ForecastRow[] = normalizedServiceForecasts.map((service) => ({
       service: sanitizeText(service.service),
@@ -957,13 +1014,32 @@ export async function GET(req: NextRequest) {
       recommendedStaff: Number(row.recommendedStaff ?? 0),
     }));
 
-    const executiveSummary = [
+    // Build the executive summary only from sections that were requested,
+    // so it never references data (e.g. inventory counts) that wasn't fetched.
+    const summarySentences: string[] = [
       `${reportTitle} summarizes the current business performance for the active dashboard period.`,
-      `Revenue is projected at ${formatCurrency(kpis.projectedRevenue ?? 0)} for the next period, with a ${formatPercent(kpis.projectedPct ?? 0)} change from the latest available trend.`,
-      `The most active service is ${forecastRows[0]?.service ?? 'N/A'} and ${urgentInventoryCount} inventory items currently require urgent attention.`,
-      `The busiest operating day is ${staffingRows[0]?.day ?? 'N/A'} and the current forecasting method is ${financialSummary.forecastMethodUsed ?? 'WMA'}.`,
-      `Expense concentration is led by ${expenseBreakdownRows[0]?.category ?? 'N/A'} at ${formatCurrency(expenseBreakdownRows[0]?.total ?? 0)}, which should be monitored closely for margin pressure.`,
-    ].join(' ');
+    ];
+    if (wantsOverview) {
+      summarySentences.push(
+        `Revenue is projected at ${formatCurrency(kpis.projectedRevenue ?? 0)} for the next period, with a ${formatPercent(kpis.projectedPct ?? 0)} change from the latest available trend.`
+      );
+    }
+    if (wantsServiceDemand) {
+      summarySentences.push(`The most active service is ${forecastRows[0]?.service ?? 'N/A'}.`);
+    }
+    if (wantsInventory) {
+      summarySentences.push(`${urgentInventoryCount} inventory item(s) currently require urgent attention.`);
+    }
+    if (wantsStaffing) {
+      summarySentences.push(`The busiest operating day is ${staffingRows[0]?.day ?? 'N/A'}.`);
+    }
+    if (wantsFinancials) {
+      summarySentences.push(
+        `Expense concentration is led by ${expenseBreakdownRows[0]?.category ?? 'N/A'} at ${formatCurrency(expenseBreakdownRows[0]?.total ?? 0)}, which should be monitored closely for margin pressure.`
+      );
+    }
+    summarySentences.push(`The current forecasting method is ${financialSummary.forecastMethodUsed ?? 'WMA'}.`);
+    const executiveSummary = summarySentences.join(' ');
 
     const payload: ReportPayload = {
       reportTitle,
@@ -971,6 +1047,7 @@ export async function GET(req: NextRequest) {
       pathname,
       forecastMethodUsed: financialSummary.forecastMethodUsed ?? 'WMA',
       executiveSummary,
+      sections,
       kpis: kpiRows,
       forecastRows,
       inventoryItems: inventoryRows,

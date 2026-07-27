@@ -17,8 +17,10 @@ import {
   Users,
   ShieldCheck,
   Download,
+  FileDown,
 } from "lucide-react";
 import { getConfiguredAdminEmails } from '@/src/lib/adminEmails';
+import ExportModal from './ExportModal';
 
 interface BeforeInstallPromptEvent extends Event {
   readonly platforms: string[];
@@ -36,6 +38,7 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
   const { session } = useAuth()
   const user = session?.user
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
+  const [exportOpen, setExportOpen] = useState(false)
 
   // PWA install
   useEffect(() => {
@@ -93,6 +96,7 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
         className={`
           fixed top-0 left-0 z-50 h-screen w-64 bg-card border-r shadow-xl
           transform transition-transform duration-300 md:static md:translate-x-0 md:shadow-none
+          flex flex-col
           ${open ? 'translate-x-0' : '-translate-x-full'}
         `}
       >
@@ -113,7 +117,7 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
         </div>
 
         {/* Navigation */}
-        <div className="flex-1 px-3 py-6">
+        <div className="flex-1 px-3 py-6 overflow-y-auto">
           <div className="text-xs uppercase text-muted-foreground px-3 mb-4 tracking-widest">MODULES</div>
           <nav className="flex flex-col gap-1">
             {links.map(({ label, href, icon: Icon }) => {
@@ -135,6 +139,18 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
                 </Link>
               )
             })}
+          </nav>
+
+          <div className="text-xs uppercase text-muted-foreground px-3 mb-4 mt-8 tracking-widest">REPORTS</div>
+          <nav className="flex flex-col gap-1">
+            <button
+              type="button"
+              onClick={() => setExportOpen(true)}
+              className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <FileDown className="h-4.5 w-4.5 shrink-0" />
+              <span>Reports</span>
+            </button>
           </nav>
         </div>
 
@@ -159,6 +175,8 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
           </Button>
         </div>
       </aside>
+
+      <ExportModal open={exportOpen} onClose={() => setExportOpen(false)} />
     </>
   )
 }

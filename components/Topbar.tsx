@@ -1,18 +1,10 @@
 "use client"
 
 import React, { useEffect, useState } from "react"
-import { Calendar, Upload, Download, Menu } from "lucide-react"
+import { Calendar, Upload, Menu } from "lucide-react"
 
 import { useUI } from "./UIContext"
-import { Button, buttonVariants } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-
-import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 
 type TopbarProps = {
   title?: string
@@ -91,28 +83,7 @@ export default function Topbar({
             Import Data
           </Button>
 
-          {/* Export */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              className={cn(
-                buttonVariants({ variant: "outline" }),
-                "hidden sm:flex gap-2"
-              )}
-            >
-              <Download className="h-4 w-4" />
-              Export Report
-            </DropdownMenuTrigger>
-
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => handleExport("pdf")}> 
-                Download as PDF
-              </DropdownMenuItem>
-
-              <DropdownMenuItem onClick={() => handleExport("excel")}> 
-                Download as Excel
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* Export now lives in the Sidebar under REPORTS → Export */}
 
           {/* AI */}
           <Button
@@ -125,34 +96,4 @@ export default function Topbar({
       </div>
     </header>
   )
-}
-
-async function handleExport(type: "pdf" | "excel") {
-  const filename = `VERDE_Report_${new Date().toISOString().slice(0, 10)}`
-  const ext = type === "pdf" ? "pdf" : "xlsx"
-  const location = window.location.pathname || "/"
-  const title = document.title || "VERDE Dashboard"
-
-  try {
-    const response = await fetch(`/api/export/report?format=${type}&path=${encodeURIComponent(location)}&title=${encodeURIComponent(title)}`)
-    if (!response.ok) {
-      throw new Error('Report export failed')
-    }
-
-    const blob = await response.blob()
-    downloadBlob(blob, `${filename}.${ext}`)
-  } catch {
-    console.error('Export failed')
-  }
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement("a")
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
 }

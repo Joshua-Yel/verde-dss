@@ -70,7 +70,7 @@ export default function AIPanel() {
       {/* Header Area */}
       <div className="flex items-center justify-between pb-4 border-b border-border/60">
         <div className="flex items-center gap-2">
-          <div className="text-sm font-semibold tracking-tight">AI Companion · Aira</div>
+          <div className="text-sm font-semibold tracking-tight">AI Companion · ARIA</div>
         </div>
         <div className="flex items-center gap-2 px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20">
           <span className="relative flex h-2 w-2">
@@ -121,7 +121,7 @@ export default function AIPanel() {
         >
           {messages.length === 0 ? (
             <div className="flex gap-2">
-              <span className="font-semibold text-primary select-none">Aira:</span>
+              <span className="font-semibold text-primary select-none">ARIA:</span>
               <p className="leading-relaxed text-foreground/80">
                 Hi — ask me about any forecast or data report inside this view.
               </p>
@@ -141,7 +141,7 @@ export default function AIPanel() {
 
           {loading && (
             <div className="flex gap-2">
-              <span className="font-semibold text-primary select-none">Aira:</span>
+              <span className="font-semibold text-primary select-none">ARIA:</span>
               <span className="flex items-center gap-1 py-1">
                 <span className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:-0.3s]" />
                 <span className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:-0.15s]" />
