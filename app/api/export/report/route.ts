@@ -854,8 +854,13 @@ async function buildWorkbook(payload: ReportPayload): Promise<ExcelJS.Workbook> 
 
 export async function GET(req: NextRequest) {
   try {
-    const { businessId, userId } = await resolveAuthenticatedBusinessId();
+    const { businessId, userId, workspaceResolutionError } = await resolveAuthenticatedBusinessId();
     if (!businessId || !userId) {
+      if (userId && workspaceResolutionError) {
+        console.error('[EXPORT REPORT] workspace resolution service failure', { stage: workspaceResolutionError.stage, message: workspaceResolutionError.message });
+        return applyNoStoreHeaders(NextResponse.json({ error: 'Workspace service is currently unavailable. Please try again later.' }, { status: 502 }));
+      }
+
       return applyNoStoreHeaders(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
     }
 

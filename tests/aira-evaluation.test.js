@@ -28,6 +28,22 @@ test("AIRA system prompt instructs the assistant to analyze available data befor
   assert.match(source, /Based on the available dashboard data/i);
 });
 
+test("AIRA system prompt prioritizes inventoryAnalytics structured inventory signals", () => {
+  const promptPath = path.join(
+    __dirname,
+    "..",
+    "app",
+    "api",
+    "aira",
+    "route.ts",
+  );
+  const source = fs.readFileSync(promptPath, "utf8");
+
+  assert.match(source, /inventoryAnalytics/i);
+  assert.match(source, /reorderPriorityItems/i);
+  assert.match(source, /topUsageItems/i);
+});
+
 test("AIRA route resolves the Gemini key from persisted config when env vars are missing", () => {
   const promptPath = path.join(
     __dirname,
@@ -88,7 +104,7 @@ test("Overview page exposes range selection for last year, last 2 years, and all
   assert.match(source, /All records/i);
 });
 
-test("AIRA context summary uses a recent lookback window for faster responses", () => {
+test("AIRA context summary loads the full historical range for year-over-year comparisons", () => {
   const ariaContextPath = path.join(
     __dirname,
     "..",
@@ -98,7 +114,8 @@ test("AIRA context summary uses a recent lookback window for faster responses", 
   );
   const source = fs.readFileSync(ariaContextPath, "utf8");
 
-  assert.match(source, /lookbackMonths:\s*12/i);
+  assert.match(source, /displayRange:\s*'all'/i);
+  assert.doesNotMatch(source, /lookbackMonths:\s*12/i);
 });
 
 test("AIRA evaluation suite covers the requested languages and intents", () => {
@@ -183,4 +200,22 @@ test("Manual reorder example is treated as actionable and grounded", () => {
 
   assert.equal(result.passed, true);
   assert.ok(result.scores.actionability >= 0.7);
+});
+
+test("AI chat labels the assistant as ARIA and renders bold markdown correctly", () => {
+  const panelPath = path.join(__dirname, "..", "components", "AIPanel.tsx");
+  const source = fs.readFileSync(panelPath, "utf8");
+
+  assert.match(source, /AI Companion · ARIA/i);
+  assert.match(source, /ARIA:/i);
+  assert.doesNotMatch(source, /Aira:/i);
+  assert.match(source, /strong/i);
+});
+
+test("Inventory data collapses repeated product names into one forecastable SKU entry", () => {
+  const supabasePath = path.join(__dirname, "..", "lib", "data", "supabase.ts");
+  const source = fs.readFileSync(supabasePath, "utf8");
+
+  assert.match(source, /groupedByName|byName|Map<string, InventoryRow>/i);
+  assert.match(source, /latest.*month|most recent.*month/i);
 });

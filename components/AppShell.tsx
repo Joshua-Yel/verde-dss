@@ -1,21 +1,44 @@
 "use client"
 
-import { useState } from "react";
-import { usePathname } from 'next/navigation'
+import { useEffect, useState } from "react";
+import { usePathname, useRouter } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
 import Topbar from '@/components/Topbar'
 import { UIProvider } from '@/components/UIContext'
 import AIPanelWrapper from '@/components/AIPanelWrapper'
 import ImportModal from '@/components/ImportModal'
 import { useAuth } from '@/app/auth-provider'
+import { canAccessModule, getUserRole } from '@/src/lib/roleAccess'
 
 const authRoutes = ['/login', '/signup']
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const router = useRouter()
   const { session, loading } = useAuth()
   const isAuthRoute = pathname ? authRoutes.includes(pathname) : false
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    if (!pathname || isAuthRoute || !session) {
+      return;
+    }
+
+    const role = getUserRole(session.user as { app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown> } | null);
+    const accessMap: Record<string, 'overview' | 'service-demand' | 'inventory' | 'financials' | 'staffing' | 'admin'> = {
+      '/': 'overview',
+      '/service-demand': 'service-demand',
+      '/inventory': 'inventory',
+      '/financials': 'financials',
+      '/staffing': 'staffing',
+      '/admin': 'admin',
+    };
+
+    const module = accessMap[pathname] ?? 'overview';
+    if (!canAccessModule(role, module)) {
+      router.replace('/');
+    }
+  }, [isAuthRoute, pathname, router, session]);
 
   if (isAuthRoute) {
     return <>{children}</>

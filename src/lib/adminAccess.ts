@@ -1,11 +1,11 @@
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { randomUUID } from 'crypto';
 import { createSupabaseRouteClient } from './supabaseRoute';
 import { supabaseServer } from './supabaseServer';
 import { getConfiguredAdminEmails } from './adminEmails';
-
+import { getUserRole, normalizeUserRole } from './roleAccess';
+import { getAssignedBusinessId } from './businessAccess';
 export { getConfiguredAdminEmails } from './adminEmails';
 
 function hasAdminRole(user: { app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown> } | null | undefined) {
@@ -16,7 +16,24 @@ function hasAdminRole(user: { app_metadata?: Record<string, unknown>; user_metad
   const appAdminFlag = user.app_metadata?.is_admin;
   const userAdminFlag = user.user_metadata?.is_admin;
 
-  return [appRole, userRole, appAdminFlag, userAdminFlag].some((value) => value === 'admin' || value === 'owner' || value === true);
+  return [appRole, userRole, appAdminFlag, userAdminFlag].some((value) => value === 'admin' || value === true);
+}
+
+function getRoleMetadata(role: string | undefined | null) {
+  const normalizedRole = normalizeUserRole(role);
+
+  switch (normalizedRole) {
+    case 'admin':
+      return { role: normalizedRole, is_admin: true };
+    case 'owner':
+      return { role: normalizedRole, is_admin: false };
+    case 'finance':
+    case 'staff':
+    case 'inventory':
+      return { role: normalizedRole, is_admin: false };
+    default:
+      return { role: 'user', is_admin: false };
+  }
 }
 
 function getUsageStorePath() {
@@ -139,8 +156,77 @@ export async function toggleUserAccess(userId: string, suspend: boolean) {
   };
 }
 
-export async function createUserAccount(input: { email: string; password: string; name: string; role?: string }) {
-  const normalizedRole = input.role === 'admin' || input.role === 'owner' ? 'admin' : 'user';
+async function syncWorkspaceMembership(userId: string, businessId: string | null, role: string, salonName?: string | null) {
+  if (!userId || !businessId) {
+    return;
+  }
+
+  try {
+    const { data: existingUser, error: lookupError } = await supabaseServer.auth.admin.getUserById(userId);
+
+    if (!lookupError && existingUser?.user) {
+      const nextUserMetadata = {
+        ...(existingUser.user.user_metadata ?? {}),
+        business_id: businessId,
+        workspace_id: businessId,
+        salon_name: salonName ?? (existingUser.user.user_metadata?.salon_name as string | null | undefined) ?? null,
+      };
+
+      await supabaseServer.auth.admin.updateUserById(userId, {
+        user_metadata: nextUserMetadata,
+      });
+    }
+  } catch {
+    // Best effort: continue even if auth metadata sync is unavailable.
+  }
+
+  try {
+    await supabaseServer.from('user_profiles').upsert({
+      id: userId,
+      workspace_id: businessId,
+      role,
+      salon_name: salonName ?? null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'id' });
+  } catch {
+    // The database may not have the user_profiles table yet; ignore and continue.
+  }
+
+  try {
+    await supabaseServer.from('workspace_members').upsert({
+      workspace_id: businessId,
+      user_id: userId,
+      role,
+      is_active: true,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'workspace_id,user_id' });
+  } catch {
+    // The database may not have the workspace_members table yet; ignore and continue.
+  }
+}
+
+async function resolveTargetBusinessId(inputBusinessId?: string | null) {
+  if (!inputBusinessId) {
+    return null;
+  }
+
+  const { data, error } = await supabaseServer
+    .from('businesses')
+    .select('id')
+    .eq('id', inputBusinessId)
+    .limit(1)
+    .maybeSingle();
+
+  if (!error && data?.id) {
+    return data.id as string;
+  }
+
+  return null;
+}
+
+export async function createUserAccount(input: { email: string; password: string; name: string; role?: string; businessId?: string | null }) {
+  const normalizedRole = normalizeUserRole(input.role);
+  const roleMetadata = getRoleMetadata(normalizedRole);
 
   const { data: authData, error: authError } = await supabaseServer.auth.admin.createUser({
     email: input.email,
@@ -148,10 +234,11 @@ export async function createUserAccount(input: { email: string; password: string
     email_confirm: true,
     user_metadata: {
       salon_name: input.name,
+      business_id: null,
     },
     app_metadata: {
-      role: normalizedRole,
-      is_admin: normalizedRole === 'admin',
+      role: roleMetadata.role,
+      is_admin: roleMetadata.is_admin,
     },
   });
 
@@ -159,19 +246,25 @@ export async function createUserAccount(input: { email: string; password: string
     throw new Error(authError?.message ?? 'Unable to create account.');
   }
 
-  await createBusiness(input.name, authData.user.id);
+  const targetBusinessId = await resolveTargetBusinessId(input.businessId);
+
+  if (targetBusinessId) {
+    await syncWorkspaceMembership(authData.user.id, targetBusinessId, normalizedRole, input.name);
+  }
 
   return {
     id: authData.user.id,
     email: authData.user.email ?? input.email,
-    role: normalizedRole,
+    role: roleMetadata.role,
+    business_id: targetBusinessId ?? null,
     created_at: authData.user.created_at,
     isSuspended: false,
   };
 }
 
-export async function updateUserRole(userId: string, role: string) {
-  const normalizedRole = role === 'admin' || role === 'owner' ? 'admin' : 'user';
+export async function updateUserRole(userId: string, role: string | undefined, workspaceId?: string | null) {
+  const normalizedRole = role ? normalizeUserRole(role) : 'user';
+  const roleMetadata = getRoleMetadata(normalizedRole);
   const { data, error } = await supabaseServer.auth.admin.getUserById(userId);
 
   if (error || !data?.user) {
@@ -180,13 +273,28 @@ export async function updateUserRole(userId: string, role: string) {
 
   const nextAppMetadata = {
     ...(data.user.app_metadata ?? {}),
-    role: normalizedRole,
-    is_admin: normalizedRole === 'admin',
+    role: typeof role === 'string' ? roleMetadata.role : getUserRole(data.user),
+    is_admin:
+      typeof role === 'string'
+        ? roleMetadata.is_admin
+        : (data.user.app_metadata?.is_admin as boolean | null | undefined) ??
+          (data.user.user_metadata?.is_admin as boolean | null | undefined) ??
+          false,
+  };
+
+  const nextUserMetadata = {
+    ...(data.user.user_metadata ?? {}),
+    business_id: getAssignedBusinessId(data.user) ?? (data.user.user_metadata?.business_id as string | null | undefined) ?? null,
   };
 
   const { data: updatedUser, error: updateError } = await supabaseServer.auth.admin.updateUserById(userId, {
     app_metadata: nextAppMetadata,
+    user_metadata: nextUserMetadata,
   });
+
+  if (workspaceId) {
+    await syncWorkspaceMembership(userId, workspaceId, normalizedRole, (updatedUser.user?.user_metadata?.salon_name as string | null | undefined) ?? null);
+  }
 
   if (updateError || !updatedUser.user) {
     throw new Error(updateError?.message ?? 'Unable to update role.');
@@ -195,7 +303,7 @@ export async function updateUserRole(userId: string, role: string) {
   return {
     id: updatedUser.user.id,
     email: updatedUser.user.email ?? null,
-    role: normalizedRole,
+    role: roleMetadata.role,
     isSuspended: Boolean(updatedUser.user.app_metadata?.is_suspended || updatedUser.user.user_metadata?.is_suspended),
   };
 }
@@ -237,15 +345,37 @@ export async function listBusinesses() {
 }
 
 export async function createBusiness(name: string, ownerId?: string | null) {
-  const id = randomUUID();
+  const { data: existingBusiness, error: existingError } = await supabaseServer
+    .from('businesses')
+    .select('id, name, owner_id, created_at')
+    .eq('owner_id', ownerId ?? '')
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingBusiness?.id) {
+    if (ownerId) {
+      await syncWorkspaceMembership(ownerId, existingBusiness.id, 'owner', name);
+    }
+    return existingBusiness;
+  }
+
+  if (existingError) {
+    throw new Error(existingError.message ?? 'Unable to resolve the project.');
+  }
+
   const { data, error } = await supabaseServer
     .from('businesses')
-    .insert({ id, name, owner_id: ownerId ?? null })
+    .insert({ name, owner_id: ownerId ?? null })
     .select('id, name, owner_id, created_at')
     .single();
 
   if (error || !data) {
     throw new Error(error?.message ?? 'Unable to create a project.');
+  }
+
+  if (ownerId) {
+    await syncWorkspaceMembership(ownerId, data.id, 'owner', name);
   }
 
   return data;
@@ -263,6 +393,10 @@ export async function updateBusinessOwner(businessId: string, ownerId: string | 
     throw new Error(error?.message ?? 'Unable to update the project owner.');
   }
 
+  if (ownerId) {
+    await syncWorkspaceMembership(ownerId, data.id, 'owner', data.name ?? null);
+  }
+
   return data;
 }
 
@@ -277,12 +411,20 @@ export async function listRegisteredUsers() {
 
   return data.users.map((user) => {
     const usage = usageStore[user.id] ?? { totalRequests: 0, estimatedTokens: 0 };
+    const userMetadata = user.user_metadata as Record<string, unknown> | undefined;
+    const appMetadata = user.app_metadata as Record<string, unknown> | undefined;
+    const business_id =
+      (userMetadata?.business_id as string | null | undefined) ??
+      (userMetadata?.workspace_id as string | null | undefined) ??
+      (appMetadata?.business_id as string | null | undefined) ??
+      (appMetadata?.workspace_id as string | null | undefined) ??
+      null;
 
     return {
       id: user.id,
       email: user.email ?? null,
-      role: (user.app_metadata?.role ?? user.user_metadata?.role ?? 'user') as string,
-      business_id: null,
+      role: getUserRole(user),
+      business_id,
       created_at: user.created_at,
       isSuspended: Boolean(user.app_metadata?.is_suspended || user.user_metadata?.is_suspended),
       totalRequests: usage.totalRequests,

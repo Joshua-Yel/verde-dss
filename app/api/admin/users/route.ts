@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { isCurrentUserAdmin, toggleUserAccess, createUserAccount, updateUserRole, listRegisteredUsers } from '@/src/lib/adminAccess';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     const allowed = await isCurrentUserAdmin();
@@ -28,12 +30,13 @@ export async function POST(request: Request) {
     const password = typeof payload?.password === 'string' ? payload.password : '';
     const name = typeof payload?.name === 'string' ? payload.name.trim() : '';
     const role = typeof payload?.role === 'string' ? payload.role : 'user';
+    const businessId = typeof payload?.businessId === 'string' ? payload.businessId : typeof payload?.workspaceId === 'string' ? payload.workspaceId : null;
 
     if (!email || !password || !name) {
       return NextResponse.json({ error: 'Email, password, and salon name are required.' }, { status: 400 });
     }
 
-    const result = await createUserAccount({ email, password, name, role });
+    const result = await createUserAccount({ email, password, name, role, businessId });
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unexpected error';
@@ -52,6 +55,11 @@ export async function PATCH(request: Request) {
     const userId = typeof payload?.userId === 'string' ? payload.userId : '';
     const suspend = typeof payload?.suspend === 'boolean' ? payload.suspend : undefined;
     const role = typeof payload?.role === 'string' ? payload.role : undefined;
+    const workspaceId = typeof payload?.workspaceId === 'string'
+      ? payload.workspaceId.trim() === ''
+        ? null
+        : payload.workspaceId
+      : undefined;
 
     if (!userId) {
       return NextResponse.json({ error: 'A user id is required.' }, { status: 400 });
@@ -61,8 +69,8 @@ export async function PATCH(request: Request) {
       return NextResponse.json(await toggleUserAccess(userId, suspend));
     }
 
-    if (role) {
-      return NextResponse.json(await updateUserRole(userId, role));
+    if (role || typeof workspaceId !== 'undefined') {
+      return NextResponse.json(await updateUserRole(userId, role, workspaceId));
     }
 
     return NextResponse.json({ error: 'No action supplied.' }, { status: 400 });

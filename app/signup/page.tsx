@@ -73,10 +73,10 @@ export default function SignUpPage() {
             <div className="flex items-baseline justify-between gap-4 pb-5 border-b border-border">
               <div>
                 <p className="text-[11px] font-mono uppercase tracking-[0.12em] text-muted-foreground mb-1.5">
-                  New workspace
+                  New account
                 </p>
                 <h1 className="font-serif text-[1.7rem] leading-tight text-foreground">
-                  Let&rsquo;s set up your workspace.
+                  Create your salon account.
                 </h1>
               </div>
               <p className="hidden sm:block text-xs font-mono text-muted-foreground/70 whitespace-nowrap pb-1">
@@ -85,7 +85,7 @@ export default function SignUpPage() {
             </div>
 
             <p className="text-sm text-muted-foreground mt-4 mb-8">
-              Add your business details to get started.
+              Create your account to join the salon workspace. An administrator will assign your workspace and role.
             </p>
 
             {success ? (
@@ -200,10 +200,10 @@ export default function SignUpPage() {
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                       </svg>
                     )}
-                    {loading ? "Creating…" : "Create workspace"}
+                    {loading ? "Creating…" : "Create account"}
                   </button>
                   <p className="text-xs text-muted-foreground/70">
-                    Data stays scoped to this workspace.
+                    Your workspace and role will be assigned by an administrator.
                   </p>
                 </div>
               </form>

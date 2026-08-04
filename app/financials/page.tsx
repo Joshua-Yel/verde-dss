@@ -3,6 +3,7 @@ import LineChart from '@/components/LineChart';
 import SmallTable from '@/components/SmallTable';
 import { ChartCardSkeleton, TableCardSkeleton } from '@/components/DailyLogSkeleton';
 import { getFinancialSummary } from '@/lib/data';
+import { forecastSeriesForModel } from '@/lib/forecast/wma';
 
 function formatCurrency(value: number) {
   return `₱${Math.round(value).toLocaleString()}`;
@@ -55,35 +56,40 @@ async function FinancialsContent() {
   const revenueSeries = financials.revenueSeries ?? [];
   const expenseSeries = financials.expenseSeries ?? [];
   const netIncomeSeries = financials.netIncomeSeries ?? [];
+  const hasRevenueHistory = revenueSeries.length >= 3 && revenueSeries.some((value) => Number.isFinite(value) && value !== 0);
+  const hasExpenseHistory = financials.dataAvailability?.expenseDataAvailable === true && expenseSeries.length >= 3;
+  const hasFinancialData = hasRevenueHistory || hasExpenseHistory;
   const latestExpense = expenseSeries[expenseSeries.length - 1] ?? 0;
   const latestNetIncome = netIncomeSeries[netIncomeSeries.length - 1] ?? 0;
-  const forecastRevenue = Math.round((revenueSeries.length > 0 ? revenueSeries[revenueSeries.length - 1] ?? 0 : 0) + (revenueSeries.length > 1 ? ((revenueSeries[revenueSeries.length - 1] ?? 0) - (revenueSeries[revenueSeries.length - 2] ?? 0)) * 0.5 : 0));
-  const forecastExpenses = Math.round((expenseSeries.length > 0 ? expenseSeries[expenseSeries.length - 1] ?? 0 : 0) + (expenseSeries.length > 1 ? ((expenseSeries[expenseSeries.length - 1] ?? 0) - (expenseSeries[expenseSeries.length - 2] ?? 0)) * 0.5 : 0));
-  const forecastNetIncome = forecastRevenue - forecastExpenses;
-  const margin = forecastRevenue > 0 ? Math.round((forecastNetIncome / forecastRevenue) * 1000) / 10 : 0;
-  const hasFinancialData = revenueSeries.length > 0 && revenueSeries.some((value) => value !== 0);
+  const seasonLength = revenueSeries.length >= 24 ? 12 : 0;
+  const revenueForecast = hasRevenueHistory ? forecastSeriesForModel(revenueSeries, 1, 3, 'wma', undefined, seasonLength)[0] ?? null : null;
+  const expenseForecast = hasExpenseHistory ? forecastSeriesForModel(expenseSeries, 1, 3, 'wma', undefined, 0)[0] ?? null : null;
+  const netIncomeForecast = hasExpenseHistory && revenueForecast !== null ? revenueForecast - (expenseForecast ?? 0) : null;
+  const marginForecast = hasExpenseHistory && revenueForecast !== null && revenueForecast > 0
+    ? Math.round((netIncomeForecast! / revenueForecast) * 1000) / 10
+    : null;
   const latestLabel = (financials.periodLabels ?? []).slice(-1)[0] ?? 'latest period';
-  const forecastRevenueLabel = hasFinancialData ? formatCurrency(forecastRevenue) : 'No data';
-  const forecastExpensesLabel = hasFinancialData ? formatCurrency(forecastExpenses) : 'No data';
-  const forecastNetIncomeLabel = hasFinancialData ? formatCurrency(forecastNetIncome) : 'No data';
-  const marginLabel = hasFinancialData ? `${margin}%` : 'No data';
+  const forecastRevenueLabel = revenueForecast !== null ? formatCurrency(revenueForecast) : 'Insufficient revenue history';
+  const forecastExpensesLabel = expenseForecast !== null ? formatCurrency(expenseForecast ?? 0) : 'Financial calculation unavailable because cost data is missing.';
+  const forecastNetIncomeLabel = netIncomeForecast !== null ? formatCurrency(netIncomeForecast ?? 0) : 'Financial calculation unavailable because cost data is missing.';
+  const marginLabel = marginForecast !== null ? `${marginForecast}%` : 'Financial calculation unavailable because cost data is missing.';
   const revenueDelta = calcDelta(revenueSeries);
   const expenseDelta = calcDelta(expenseSeries);
   const netIncomeDelta = calcDelta(netIncomeSeries);
-  const revenueChange = hasFinancialData ? `${revenueDelta >= 0 ? '+' : ''}${revenueDelta.toFixed(1)}%` : '—';
-  const expenseChange = hasFinancialData ? `${expenseDelta >= 0 ? '+' : ''}${expenseDelta.toFixed(1)}%` : '—';
-  const netIncomeChange = hasFinancialData ? `${netIncomeDelta >= 0 ? '+' : ''}${netIncomeDelta.toFixed(1)}%` : '—';
-  const marginChange = hasFinancialData ? `${margin >= 0 ? '+' : ''}${margin.toFixed(1)}%` : '—';
+  const revenueChange = hasRevenueHistory ? `${revenueDelta >= 0 ? '+' : ''}${revenueDelta.toFixed(1)}%` : '—';
+  const expenseChange = hasExpenseHistory ? `${expenseDelta >= 0 ? '+' : ''}${expenseDelta.toFixed(1)}%` : '—';
+  const netIncomeChange = hasExpenseHistory ? `${netIncomeDelta >= 0 ? '+' : ''}${netIncomeDelta.toFixed(1)}%` : '—';
+  const marginChange = marginForecast !== null ? `${marginForecast >= 0 ? '+' : ''}${marginForecast.toFixed(1)}%` : '—';
   const expenseBreakdown = (financials.expenseBreakdown ?? []).map((row: { category: string; total: number }) => ({
     category: row.category,
     total: row.total ?? 0,
-    forecast: hasFinancialData ? formatCurrency((row.total ?? 0) * 1.02) : 'No data',
-    share: hasFinancialData ? `${Math.round((row.total / Math.max(1, latestExpense)) * 1000) / 10}%` : 'No data',
+    forecast: hasExpenseHistory ? formatCurrency((row.total ?? 0) * 1.02) : 'No expense data',
+    share: hasExpenseHistory ? `${Math.round((row.total / Math.max(1, latestExpense)) * 1000) / 10}%` : 'No expense data',
   }));
-  const maxNetIncome = Math.max(...netIncomeSeries, forecastNetIncome);
+  const maxNetIncome = Math.max(...netIncomeSeries, netIncomeForecast ?? latestNetIncome);
   const latestNetIncomePercentage = maxNetIncome > 0 ? Math.round((latestNetIncome / maxNetIncome) * 100) : 0;
   const previousNetIncome = netIncomeSeries[netIncomeSeries.length - 2] ?? latestNetIncome;
-  const forecastNetIncomePercentage = maxNetIncome > 0 ? Math.round((forecastNetIncome / maxNetIncome) * 100) : 0;
+  const forecastNetIncomePercentage = maxNetIncome > 0 && netIncomeForecast !== null ? Math.round((netIncomeForecast / maxNetIncome) * 100) : 0;
   const priorNetIncomePercentage = maxNetIncome > 0 ? Math.round((previousNetIncome / maxNetIncome) * 100) : 0;
 
   return (
@@ -198,10 +204,10 @@ async function FinancialsContent() {
               </div>
               <LineChart
                 height={260}
-                labels={[...(financials.periodLabels ?? []), 'Forecast']}
+                labels={hasFinancialData ? [...(financials.periodLabels ?? []), 'Forecast'] : financials.periodLabels ?? []}
                 datasets={[
-                  { label: 'Revenue', data: [...revenueSeries, forecastRevenue], borderColor: 'hsl(var(--primary))' },
-                  { label: 'Expenses', data: [...expenseSeries, forecastExpenses], borderColor: 'hsl(var(--destructive))' },
+                  { label: 'Revenue', data: hasRevenueHistory ? [...revenueSeries, revenueForecast ?? 0] : revenueSeries, borderColor: 'hsl(var(--primary))' },
+                  { label: 'Expenses', data: hasExpenseHistory ? [...expenseSeries, expenseForecast ?? 0] : expenseSeries, borderColor: 'hsl(var(--destructive))' },
                 ]}
               />
             </div>
@@ -223,8 +229,8 @@ async function FinancialsContent() {
               {[
                 {
                   label: 'Forecast',
-                  value: hasFinancialData ? formatCurrency(forecastNetIncome) : 'No data',
-                  percentage: hasFinancialData ? forecastNetIncomePercentage : 0,
+                  value: netIncomeForecast !== null ? formatCurrency(netIncomeForecast) : 'No data',
+                  percentage: netIncomeForecast !== null ? forecastNetIncomePercentage : 0,
                   badge: 'Forecast',
                 },
                 {

@@ -7,6 +7,7 @@ import {
   getServiceByWeekday,
   getExpenseCategoryBreakdown,
   getInventoryConsumptionSignal,
+  getInventoryAnalytics as getInventoryAnalyticsFromSupabase,
 } from './supabase'
 
 export type DashboardRangeOption = '1y' | '2y' | 'all';
@@ -106,6 +107,15 @@ export async function getInventoryItems(options?: DashboardDataOptions) {
     displayRange: options?.displayRange,
   })
   return data.inventoryItems
+}
+
+export async function getInventoryAnalytics(options?: DashboardDataOptions) {
+  const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
+  return getInventoryAnalyticsFromSupabase(userId ?? '', {
+    businessId: options?.businessId,
+    lookbackMonths: options?.lookbackMonths,
+    displayRange: options?.displayRange,
+  })
 }
 
 export async function getFinancialSummary(options?: DashboardDataOptions) {

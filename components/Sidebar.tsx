@@ -20,6 +20,7 @@ import {
   FileDown,
 } from "lucide-react";
 import { getConfiguredAdminEmails } from '@/src/lib/adminEmails';
+import { getUserRole, canAccessModule } from '@/src/lib/roleAccess';
 import ExportModal from './ExportModal';
 
 interface BeforeInstallPromptEvent extends Event {
@@ -52,17 +53,16 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
   }, [])
 
   const adminEmails = getConfiguredAdminEmails()
-  const isAdmin = !!user?.email && adminEmails.includes(user.email.toLowerCase())
+  const isConfiguredAdmin = !!user?.email && adminEmails.includes(user.email.toLowerCase())
+  const role = isConfiguredAdmin ? 'admin' : getUserRole(user ? { app_metadata: user?.app_metadata, user_metadata: user?.user_metadata } : null)
 
   const links = [
     { label: "Overview", href: "/", icon: LayoutDashboard },
-    ...(!isAdmin ? [
-      { label: "Service Demand", href: "/service-demand", icon: TrendingUp },
-      { label: "Inventory", href: "/inventory", icon: Package },
-      { label: "Financials", href: "/financials", icon: PhilippinePeso },
-      { label: "Staffing", href: "/staffing", icon: Users },
-    ] : []),
-    ...(isAdmin ? [{ label: "Admin", href: "/admin", icon: ShieldCheck }] : []),
+    ...(canAccessModule(role, 'service-demand') ? [{ label: "Service Demand", href: "/service-demand", icon: TrendingUp }] : []),
+    ...(canAccessModule(role, 'inventory') ? [{ label: "Inventory", href: "/inventory", icon: Package }] : []),
+    ...(canAccessModule(role, 'financials') ? [{ label: "Financials", href: "/financials", icon: PhilippinePeso }] : []),
+    ...(canAccessModule(role, 'staffing') ? [{ label: "Staffing", href: "/staffing", icon: Users }] : []),
+    ...(canAccessModule(role, 'admin') ? [{ label: "Admin", href: "/admin", icon: ShieldCheck }] : []),
   ]
 
   const router = useRouter()
@@ -162,7 +162,7 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold truncate">{user?.email}</div>
-              <div className="text-xs text-muted-foreground">Owner</div>
+              <div className="text-xs text-muted-foreground">{role ? role.charAt(0).toUpperCase() + role.slice(1) : 'User'}</div>
             </div>
           </div>
 

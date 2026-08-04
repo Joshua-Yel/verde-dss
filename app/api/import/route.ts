@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 import { revalidateTag } from 'next/cache'
-import { randomUUID } from 'crypto'
 import supabaseServer from '../../../src/lib/supabaseServer'
 import { createSupabaseRouteClient } from '../../../src/lib/supabaseRoute'
+import { resolveBusinessIdForUser } from '../../../src/lib/businessAccess'
+import { insertWithBusinessIdFallback } from '../../../src/lib/supabaseCompat'
 
 const revalidateDashboardTag = revalidateTag as unknown as (tag: string) => void
 
@@ -69,46 +70,26 @@ function normalizeDate(value: unknown): string | null {
   return parsed.toISOString().slice(0, 10)
 }
 
-// Resolves the business that belongs to the current user.
-// Each account has exactly one business (created at signup) — imports
-// always attach to that business. A "business_name" column in the
-// spreadsheet, if present, is informational only and is NOT used to
-// look up or create a different business row. Matching by name previously
-// caused duplicate business rows per user whenever the sheet's name didn't
-// exactly match the one entered at signup.
+// Resolves the workspace/business that belongs to the current user.
+// Imports always attach to that shared workspace, and the resolution logic
+// now uses the same shared helper as dashboards, ARIA, and exports so all
+// routes stay consistent.
 async function resolveBusinessId(
-  ownerId: string,
+  user: { id?: string | null; app_metadata?: Record<string, unknown> | null; user_metadata?: Record<string, unknown> | null } | null | undefined,
   filename: string | undefined
 ): Promise<{ businessId: string } | { error: NextResponse }> {
-  const { data: businessData } = await supabaseServer
-    .from('businesses')
-    .select('id')
-    .eq('owner_id', ownerId)
-    .order('created_at', { ascending: true })
-    .limit(1)
+  const resolvedBusinessId = await resolveBusinessIdForUser(supabaseServer, user)
 
-  if (businessData && businessData[0]?.id) {
-    return { businessId: businessData[0].id }
+  if (resolvedBusinessId) {
+    return { businessId: resolvedBusinessId }
   }
 
-  // Fallback: user somehow has no business row yet. Create a minimal one
-  // so the import doesn't fail outright.
-  const businessIdCandidate = randomUUID()
-  const insertBusiness = await supabaseServer
-    .from('businesses')
-    .insert({ id: businessIdCandidate, name: filename ?? 'My business', owner_id: ownerId })
-    .select('id')
-
-  if (insertBusiness.error || !insertBusiness.data || insertBusiness.data.length === 0) {
-    return {
-      error: NextResponse.json(
-        { error: insertBusiness.error?.message ?? 'Failed to create a business record for this import.' },
-        { status: 500 }
-      ),
-    }
+  return {
+    error: NextResponse.json(
+      { error: `No workspace is associated with this account yet. Please complete sign-up before importing ${filename ? 'this file' : 'data'}.` },
+      { status: 404 }
+    ),
   }
-
-  return { businessId: insertBusiness.data[0].id }
 }
 
 export async function POST(request: Request) {
@@ -171,21 +152,25 @@ export async function POST(request: Request) {
         )
       }
 
-      if (!process.env.SUPABASE_SERVICE_ROLE_KEY && !process.env.SUPABASE_SERVICE_KEY) {
+      if (!process.env.SUPABASE_SERVICE_ROLE_KEY && !process.env.SUPABASE_SERVICE_KEY && !process.env.SUPABASE_SECRET_KEY) {
         return NextResponse.json({ error: 'Server is not configured for Supabase writes' }, { status: 500 })
       }
 
-      const resolved = await resolveBusinessId(user.id, filename)
+      const resolved = await resolveBusinessId(user, filename)
       if ('error' in resolved) return resolved.error
       const businessId = resolved.businessId
 
-      const rawInsert = await supabaseServer.from('raw_imports').insert([
-        {
-          filename: filename || 'upload',
-          data: rows,
-          business_id: businessId,
-        },
-      ])
+      const rawInsert = await insertWithBusinessIdFallback(
+        supabaseServer,
+        'raw_imports',
+        [
+          {
+            filename: filename || 'upload',
+            data: rows,
+          },
+        ],
+        businessId,
+      )
       if (rawInsert.error) {
         return NextResponse.json({ error: rawInsert.error.message }, { status: 500 })
       }
@@ -220,28 +205,30 @@ export async function POST(request: Request) {
         const stock = normalizeNumber(row.closing_stock ?? row.opening_stock) ?? 0
 
         if (existingByName.has(name)) {
-          updates.push({
+          const updateRow: Record<string, unknown> = {
             id: existingByName.get(name),
-            supplier,
             stock,
-            reorder_point,
-            unit_cost,
-          })
+          }
+          if (supplier !== null) updateRow.supplier = supplier
+          if (reorder_point !== null) updateRow.reorder_point = reorder_point
+          if (unit_cost !== null) updateRow.unit_cost = unit_cost
+
+          updates.push(updateRow)
         } else {
           inserts.push({
             business_id: businessId,
             name,
             supplier,
             stock,
-            reorder_point,
-            unit_cost,
+            reorder_point: reorder_point ?? 0,
+            unit_cost: unit_cost ?? 0,
           })
         }
       }
 
       const inventoryWriteError = (error: unknown) => {
         const message = error instanceof Error ? error.message : String(error)
-        if (message.includes('public.inventory_items') || message.includes('inventory_items')) {
+        if (message.includes('public.inventory_items') || message.includes('inventory_items') || message.includes('does not exist')) {
           return NextResponse.json(
             {
               message: 'Inventory raw upload accepted, but inventory persistence failed because the inventory_items table is not available in the database schema. Please create the table and then reprocess the import.',
@@ -254,16 +241,24 @@ export async function POST(request: Request) {
       }
 
       if (inserts.length) {
-        const { error: insertError } = await supabaseServer.from('inventory_items').insert(inserts)
-        if (insertError) {
-          return inventoryWriteError(insertError)
+        try {
+          const { error: insertError } = await supabaseServer.from('inventory_items').insert(inserts)
+          if (insertError) {
+            return inventoryWriteError(insertError)
+          }
+        } catch (error) {
+          return inventoryWriteError(error)
         }
       }
 
       if (updates.length) {
-        const { error: updateError } = await supabaseServer.from('inventory_items').upsert(updates, { onConflict: 'id' })
-        if (updateError) {
-          return inventoryWriteError(updateError)
+        try {
+          const { error: updateError } = await supabaseServer.from('inventory_items').upsert(updates, { onConflict: 'id' })
+          if (updateError) {
+            return inventoryWriteError(updateError)
+          }
+        } catch (error) {
+          return inventoryWriteError(error)
         }
       }
 
@@ -295,21 +290,25 @@ export async function POST(request: Request) {
         )
       }
 
-      if (!process.env.SUPABASE_SERVICE_ROLE_KEY && !process.env.SUPABASE_SERVICE_KEY) {
+      if (!process.env.SUPABASE_SERVICE_ROLE_KEY && !process.env.SUPABASE_SERVICE_KEY && !process.env.SUPABASE_SECRET_KEY) {
         return NextResponse.json({ error: 'Server is not configured for Supabase writes' }, { status: 500 })
       }
 
-      const resolved = await resolveBusinessId(user.id, filename)
+      const resolved = await resolveBusinessId(user, filename)
       if ('error' in resolved) return resolved.error
       const businessId = resolved.businessId
 
-      const rawInsert = await supabaseServer.from('raw_imports').insert([
-        {
-          filename: filename || 'upload',
-          data: rows,
-          business_id: businessId,
-        },
-      ])
+      const rawInsert = await insertWithBusinessIdFallback(
+        supabaseServer,
+        'raw_imports',
+        [
+          {
+            filename: filename || 'upload',
+            data: rows,
+          },
+        ],
+        businessId,
+      )
       if (rawInsert.error) {
         return NextResponse.json({ error: rawInsert.error.message }, { status: 500 })
       }
@@ -348,24 +347,28 @@ export async function POST(request: Request) {
       )
     }
 
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY && !process.env.SUPABASE_SERVICE_KEY) {
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY && !process.env.SUPABASE_SERVICE_KEY && !process.env.SUPABASE_SECRET_KEY) {
       return NextResponse.json({ error: 'Server is not configured for Supabase writes' }, { status: 500 })
     }
 
-    const resolved = await resolveBusinessId(user.id, filename)
+    const resolved = await resolveBusinessId(user, filename)
     if ('error' in resolved) return resolved.error
     const businessId = resolved.businessId
 
-    const rawInsert = await supabaseServer.from('raw_imports').insert([
-      {
-        filename: filename || 'upload',
-        data: mapped.map(({ rowIndex, ...rest }) => {
-          void rowIndex
-          return rest
-        }),
-        business_id: businessId,
-      },
-    ])
+    const rawInsert = await insertWithBusinessIdFallback(
+      supabaseServer,
+      'raw_imports',
+      [
+        {
+          filename: filename || 'upload',
+          data: mapped.map(({ rowIndex, ...rest }) => {
+            void rowIndex
+            return rest
+          }),
+        },
+      ],
+      businessId,
+    )
     if (rawInsert.error) {
       return NextResponse.json({ error: rawInsert.error.message }, { status: 500 })
     }

@@ -7,14 +7,37 @@ interface ChatMessage {
   content: string;
 }
 
+interface AIPanelProps {
+  /** Optional current dashboard module for context-aware answers */
+  module?: string | null;
+}
+
 const QUICK_PROMPTS = [
   'Why did revenue rise?',
   'What to reorder this week?',
   'Top 3 growth services',
   'Explain MAPE',
+  'How many staff are needed next month?',
 ];
 
-export default function AIPanel() {
+function renderMessageContent(content: string) {
+  return content.split(/\n/).map((line, lineIndex) => (
+    <span key={`${lineIndex}-${line.slice(0, 10)}`} className="block">
+      {line.split(/(\*\*[^*]+\*\*)/g).map((segment, segmentIndex) => {
+        if (segment.startsWith('**') && segment.endsWith('**')) {
+          return (
+            <strong key={`${segmentIndex}-${segment}`} className="font-semibold text-foreground">
+              {segment.slice(2, -2)}
+            </strong>
+          );
+        }
+        return <React.Fragment key={`${segmentIndex}-${segment}`}>{segment}</React.Fragment>;
+      })}
+    </span>
+  ));
+}
+
+export default function AIPanel({ module = null }: AIPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -41,7 +64,10 @@ export default function AIPanel() {
       const res = await fetch('/api/aira', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: nextMessages }),
+        body: JSON.stringify({
+          messages: nextMessages,
+          module: module ?? null,
+        }),
       });
 
       const data = await res.json();
@@ -66,7 +92,6 @@ export default function AIPanel() {
 
   return (
     <aside className="p-5 flex flex-col h-full text-foreground transition-colors duration-200">
-
       {/* Header Area */}
       <div className="flex items-center justify-between pb-4 border-b border-border/60">
         <div className="flex items-center gap-2">
@@ -78,17 +103,6 @@ export default function AIPanel() {
             <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
           </span>
           <span className="text-[10px] font-medium uppercase tracking-wider text-primary">Online</span>
-        </div>
-      </div>
-
-      {/* Insight Section */}
-      <div className="mt-5 p-4 rounded-xl border border-border bg-card shadow-sm group hover:border-primary/30 transition-all duration-200">
-        <div className="flex items-center gap-1.5 text-xs font-bold tracking-wider text-muted-foreground uppercase">
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12h10"/><path d="M9 4v16"/><path d="m3 9 3 3-3 3"/><path d="M14 12h8"/><path d="m21 9-3 3 3 3"/></svg>
-          Insight
-        </div>
-        <div className="text-xs leading-relaxed text-foreground/90 mt-2.5">
-          WMA ($n=3$) projects modest growth next month; prioritize <span className="font-semibold text-primary">Gel Manicure</span> inventory.
         </div>
       </div>
 
@@ -112,7 +126,9 @@ export default function AIPanel() {
       {/* Chat Area Section */}
       <div className="mt-6 flex-1 flex flex-col min-h-[220px]">
         <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80 mb-2 flex items-center gap-1">
-          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
           Conversation History
         </div>
         <div
@@ -123,18 +139,22 @@ export default function AIPanel() {
             <div className="flex gap-2">
               <span className="font-semibold text-primary select-none">ARIA:</span>
               <p className="leading-relaxed text-foreground/80">
-                Hi — ask me about any forecast or data report inside this view.
+                Hi — ask me about forecasts, reorders, service demand, staffing, or any data report in this view.
               </p>
             </div>
           ) : (
             messages.map((message, i) => (
               <div key={i} className="flex gap-2">
-                <span className={`font-semibold select-none shrink-0 ${message.role === 'model' ? 'text-primary' : 'text-foreground/70'}`}>
-                  {message.role === 'model' ? 'Aira:' : 'You:'}
+                <span
+                  className={`font-semibold select-none shrink-0 ${
+                    message.role === 'model' ? 'text-primary' : 'text-foreground/70'
+                  }`}
+                >
+                  {message.role === 'model' ? 'ARIA:' : 'You:'}
                 </span>
-                <p className="leading-relaxed text-foreground/80 whitespace-pre-wrap">
-                  {message.content}
-                </p>
+                <div className="leading-relaxed text-foreground/80 whitespace-pre-wrap">
+                  {renderMessageContent(message.content)}
+                </div>
               </div>
             ))
           )}
@@ -172,7 +192,20 @@ export default function AIPanel() {
           disabled={loading || !input.trim()}
           className="absolute right-2.5 p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 5v14"/></svg>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="m5 12 7-7 7 7" />
+            <path d="M12 5v14" />
+          </svg>
         </button>
       </form>
 
@@ -181,7 +214,6 @@ export default function AIPanel() {
         <span>Powered by Gemini</span>
         <span className="opacity-70">Forecasts from WMA Engine</span>
       </div>
-
     </aside>
   );
 }

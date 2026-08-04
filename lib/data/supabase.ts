@@ -3,6 +3,7 @@ import { unstable_cache } from 'next/cache'
 import { supabaseServer } from '@/src/lib/supabaseServer'
 import { forecastSeriesForModel, type ForecastModel } from '../forecast/wma'
 import { bucketKeyForDate, resolveDateRange, type PeriodGranularity } from '@/lib/dateRange'
+import { resolveBusinessIdForUser } from '@/src/lib/businessAccess'
 
 interface ServiceRow {
   id: number
@@ -23,6 +24,23 @@ interface InventoryRow {
   closing_stock?: number | null
   opening_stock?: number | null
   purchased?: number | null
+  history?: Array<{
+    month: string | null
+    used: number
+    purchased: number
+    opening_stock: number
+    closing_stock: number
+  }>
+
+  // Derived fields used in inventory analytics and UI
+  reorderPoint?: number | null
+  unitCost?: number | null
+  consumptionRate?: number
+  avgMonthlyUsage?: number
+  projectedNextMonth?: number | null
+  reorderQuantity?: number | null
+  daysOfCover?: number | null
+  statusNote?: string | null
 }
 
 interface OperationRow {
@@ -80,13 +98,14 @@ function getDaysInMonth(month: string | null | undefined) {
 }
 
 function calculateMape(values: number[], model: ForecastModel, window = 3) {
-  if (values.length < 2) return 0
+  const history = values.filter((value) => Number.isFinite(value))
+  if (history.length < 2) return 0
 
   const errors: number[] = []
-  for (let index = 1; index < values.length; index += 1) {
-    const history = values.slice(0, index)
-    const prediction = predictNextValue(history, model, Math.min(window, history.length))
-    const actual = values[index]
+  for (let index = 1; index < history.length; index += 1) {
+    const slice = history.slice(0, index)
+    const prediction = predictNextValue(slice, model, Math.min(window, slice.length))
+    const actual = history[index]
     if (actual > 0) {
       errors.push(Math.abs((actual - prediction) / actual) * 100)
     }
@@ -96,11 +115,34 @@ function calculateMape(values: number[], model: ForecastModel, window = 3) {
   return errors.reduce((sum, error) => sum + error, 0) / errors.length
 }
 
-function predictNextValue(values: number[], model: ForecastModel, window = 3) {
-  if (values.length === 0) return 0
-  const history = values.slice(-Math.max(1, Math.min(window, values.length)))
+function standardDeviation(values: number[]) {
+  const list = values.filter((value) => Number.isFinite(value))
+  if (list.length < 2) return 0
+  const mean = list.reduce((sum, value) => sum + value, 0) / list.length
+  const variance = list.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (list.length - 1)
+  return Math.sqrt(variance)
+}
+
+function coefficientOfVariation(values: number[]) {
+  const list = values.filter((value) => Number.isFinite(value))
+  if (list.length < 2) return 0
+  const mean = list.reduce((sum, value) => sum + value, 0) / list.length
+  if (mean === 0) return 0
+  return standardDeviation(list) / Math.abs(mean)
+}
+
+function predictNextValue(values: number[], model: ForecastModel, window = 3, seasonLength = 0) {
+  const series = values.filter((value) => Number.isFinite(value))
+  if (series.length === 0) return 0
+  if (series.length === 1) return series[0]
+
+  const history = series.slice(-Math.max(1, Math.min(window, series.length)))
 
   if (model === 'naive') {
+    if (seasonLength > 0 && series.length >= seasonLength * 2) {
+      const seasonalIndex = series.length - seasonLength
+      return series[seasonalIndex] ?? history[history.length - 1] ?? 0
+    }
     return history[history.length - 1] ?? 0
   }
 
@@ -160,13 +202,8 @@ function findMatchingRows(importPayloads: RawRow[][], candidateKeys: string[]): 
 async function resolveBusinessId(client: typeof supabaseServer, userId: string | null | undefined) {
   if (!userId) return null
 
-  const { data: businesses } = await client
-    .from('businesses')
-    .select('id')
-    .eq('owner_id', userId)
-    .limit(1)
-
-  return businesses?.[0]?.id ?? null
+  const { data: userData } = await client.auth.admin.getUserById(userId)
+  return resolveBusinessIdForUser(client, userData?.user ?? null)
 }
 
 const getDashboardDataForUser = async (userId: string, options?: DashboardDataOptions) => {
@@ -394,15 +431,21 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
   const serviceForecasts = services.map((service) => {
     const actuals = serviceSeries.get(service.id) ?? []
     const visibleActuals = visibleServiceSeries.get(service.id) ?? []
+    const seasonLength = granularity === 'monthly' && actuals.length >= 24 ? 12 : granularity === 'weekly' && actuals.length >= 52 ? 52 : 0
     const forecastValuesByModel: Record<ForecastModel, number[]> = {
-      wma: forecastSeriesForModel(actuals, 3, Math.min(3, actuals.length), 'wma'),
-      sma: forecastSeriesForModel(actuals, 3, Math.min(3, actuals.length), 'sma'),
-      naive: forecastSeriesForModel(actuals, 3, Math.min(3, actuals.length), 'naive'),
+      wma: forecastSeriesForModel(actuals, 3, Math.min(3, actuals.length), 'wma', undefined, seasonLength),
+      sma: forecastSeriesForModel(actuals, 3, Math.min(3, actuals.length), 'sma', undefined, seasonLength),
+      naive: forecastSeriesForModel(actuals, 3, Math.min(3, actuals.length), 'naive', undefined, seasonLength),
     }
     const lastActual = visibleActuals[visibleActuals.length - 1] ?? actuals[actuals.length - 1] ?? 0
     const mapeByModel = Object.fromEntries(
       (Object.entries(forecastValuesByModel) as Array<[ForecastModel, number[]]>).map(([model]) => [model, `${calculateMape(actuals, model, Math.min(3, actuals.length)).toFixed(1)}%`])
     ) as Record<ForecastModel, string>
+    const reliability = {
+      dataPoints: actuals.filter((value) => Number.isFinite(value)).length,
+      coefficientOfVariation: Number((coefficientOfVariation(actuals) * 100).toFixed(1)),
+      category: actuals.length < 3 ? 'Insufficient data' : coefficientOfVariation(actuals) < 0.25 ? 'Higher reliability' : coefficientOfVariation(actuals) < 0.5 ? 'Moderate reliability' : 'Lower reliability',
+    }
     const forecastRevenueByModel = Object.fromEntries(
       (Object.entries(forecastValuesByModel) as Array<[ForecastModel, number[]]>).map(([model, values]) => [model, Number(service.price ?? 0) * (values[0] ?? 0)])
     ) as Record<ForecastModel, number>
@@ -419,12 +462,14 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
       forecastRevenue: forecastRevenueByModel.wma,
       forecastRevenueByModel,
       forecastMethodUsed: actuals.length >= 3 ? 'WMA (3-point)' : 'WMA (available history)',
+      forecastReliability: reliability,
     }
   })
 
-  const forecastNext = forecastSeriesForModel(revenueSeries, 1, Math.min(3, revenueSeries.length), 'wma')[0] ?? 0
+  const revenueSeasonLength = granularity === 'monthly' && revenueSeries.length >= 24 ? 12 : granularity === 'weekly' && revenueSeries.length >= 52 ? 52 : 0
+  const forecastNext = revenueSeries.length >= 2 ? forecastSeriesForModel(revenueSeries, 1, Math.min(3, revenueSeries.length), 'wma', undefined, revenueSeasonLength)[0] ?? 0 : 0
   const lastRevenue = revenueSeries[revenueSeries.length - 1] ?? 0
-  const projectedPct = lastRevenue > 0 ? ((forecastNext - lastRevenue) / lastRevenue) * 100 : 0
+  const projectedPct = lastRevenue > 0 && revenueSeries.length >= 2 ? ((forecastNext - lastRevenue) / lastRevenue) * 100 : null
 
   const topService = serviceForecasts
     .slice()
@@ -444,46 +489,82 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
       bookings: service.bookings,
     }))
 
-  const inventoryItems = inventory
-    .map((item) => {
-      const latestStock = item.stock ?? 0
-      const used = item.used ?? 0
-      const monthDays = getDaysInMonth(item.month)
-      const consumptionRate = monthDays > 0 ? used / monthDays : 0
-      const daysOfCover = consumptionRate > 0 ? latestStock / consumptionRate : Number.POSITIVE_INFINITY
-      const criticalDays = 14
-      const status = daysOfCover < criticalDays ? 'Critical' : daysOfCover < 30 ? 'Low' : 'Healthy'
-      const statusNote = item.status ? `Marked ${item.status}` : null
-      const reorderQuantity = Math.max(0, Math.round((60 * Math.max(consumptionRate, 1)) - latestStock))
-      const unitCost = item.unit_cost ?? 0
+  const inventoryByName = new Map<string, InventoryRow[]>()
+  for (const item of inventory) {
+    const name = (item.name ?? '').trim()
+    if (!name) continue
+    const bucket = inventoryByName.get(name) ?? []
+    bucket.push(item)
+    inventoryByName.set(name, bucket)
+  }
+
+  const inventoryItems = Array.from(inventoryByName.entries())
+    .map(([name, rows]) => {
+      const sortedRows = [...rows].sort((left, right) => {
+        const leftValue = left.month ?? '1970-01'
+        const rightValue = right.month ?? '1970-01'
+        return leftValue.localeCompare(rightValue)
+      })
+      const latestRow = sortedRows.at(-1) ?? rows[0]
+      const latestStock = latestRow?.stock ?? 0
+      const usageHistory = sortedRows
+        .map((row) => Number(row.used ?? 0))
+        .filter((amount) => Number.isFinite(amount) && amount >= 0)
+      const avgMonthlyUsage = usageHistory.length > 0
+        ? usageHistory.reduce((sum, value) => sum + value, 0) / usageHistory.length
+        : 0
+      const projectedNextMonth = usageHistory.length >= 2 ? Math.max(0, latestStock - avgMonthlyUsage) : null
+      const monthDays = getDaysInMonth(latestRow?.month)
+      const consumptionRate = monthDays > 0 && avgMonthlyUsage > 0 ? avgMonthlyUsage / monthDays : 0
+      const daysOfCover = consumptionRate > 0 ? latestStock / consumptionRate : null
+      const reorderPoint = latestRow?.reorder_point ?? null
+      const reorderQuantity = reorderPoint !== null ? Math.max(0, Math.round(reorderPoint - latestStock)) : null
+      const status = reorderPoint !== null
+        ? latestStock <= reorderPoint
+          ? 'At or below reorder point'
+          : 'Above reorder point'
+        : 'Reorder point unavailable'
+      const unitCost = latestRow?.unit_cost ?? null
+      const history = sortedRows.map((row) => ({
+        month: row.month ?? null,
+        used: Number(row.used ?? 0),
+        purchased: Number(row.purchased ?? 0),
+        opening_stock: Number(row.opening_stock ?? 0),
+        closing_stock: Number(row.closing_stock ?? 0),
+      }))
       return {
-        name: item.name,
-        supplier: item.supplier ?? '',
+        name,
+        supplier: latestRow?.supplier ?? '',
         stock: latestStock,
-        reorderPoint: item.reorder_point ?? 0,
-        unitCost: unitCost,
+        reorderPoint,
+        unitCost,
         consumptionRate,
+        avgMonthlyUsage,
+        projectedNextMonth,
+        usageHistory,
+        history,
         daysOfCover,
         status,
-        statusNote,
+        statusNote: latestRow?.status ? `Marked ${latestRow.status}` : null,
         reorderQuantity,
-        month: item.month,
+        month: latestRow?.month,
       }
     })
     .sort((left, right) => left.name.localeCompare(right.name))
 
   const restockList = inventoryItems
+    .filter((item) => item.reorderPoint !== null && item.stock !== null && item.stock <= item.reorderPoint)
     .map((item) => ({
       name: item.name,
       stock: item.stock,
       rp: item.reorderPoint,
-      days: Number.isFinite(item.daysOfCover) ? Math.max(1, Math.round(item.daysOfCover)) : 999,
+      days: item.daysOfCover !== null ? Math.max(1, Math.round(item.daysOfCover)) : null,
       supplier: item.supplier,
       status: item.status,
       unitCost: item.unitCost,
       reorderQuantity: item.reorderQuantity,
     }))
-    .sort((left, right) => left.stock - right.stock)
+    .sort((left, right) => (left.rp ?? 0) - (right.rp ?? 0))
 
   const categorySeries = new Map<string, Map<string, number>>()
   for (const row of expenseRows) {
@@ -516,27 +597,28 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
   const totalSessions = visibleOperations.reduce((sum, row) => sum + Number(row.quantity ?? (row.revenue ? 1 : 0)), 0)
   const activeDays = new Set(visibleOperations.map((row) => row.date)).size || Math.max(1, visibleRevenueSeries.length)
   const avgDailyRevenue = totalRevenue / activeDays
-  const totalNetIncome = totalRevenue - totalExpenses
+  const hasExpenseData = expenseRows.length > 0
+  const totalNetIncome = hasExpenseData ? totalRevenue - totalExpenses : null
 
+  const revenueVolatility = standardDeviation(visibleRevenueSeries)
+  const expenseVolatility = standardDeviation(visibleExpenseSeries)
   const confidenceBand = {
-    revenue: Math.max(1000, Math.round((revenueSeries[revenueSeries.length - 1] ?? 0) * 0.12)),
-    expense: Math.max(800, Math.round((expenseSeries[expenseSeries.length - 1] ?? 0) * 0.1)),
+    revenue: Math.round(revenueVolatility),
+    expense: Math.round(expenseVolatility),
   }
 
 
   const dailyLog = visibleOperations
     .map((op) => {
       const day = new Date(op.date).toLocaleDateString('en-US', { weekday: 'long' })
-      const expenses = Math.round(Number(op.revenue ?? 0) * 0.38)
-      const net = Number(op.revenue ?? 0) - expenses
       const service = op.service_id !== null ? serviceMap.get(op.service_id) : undefined
       return {
         date: op.date,
         day,
         sessions: op.quantity,
         revenue: op.revenue,
-        expenses,
-        net,
+        expenses: null,
+        net: null,
         topService: service?.name ?? 'N/A',
       }
     })
@@ -552,11 +634,11 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
     periodLabels: visibleLabels,
     revenueSeries: visibleRevenueSeries,
     expenseSeries: visibleExpenseSeries,
-    netIncomeSeries: visibleNetIncomeSeries,
+    netIncomeSeries: hasExpenseData ? visibleNetIncomeSeries : [],
     inventoryItems,
     kpis: {
       projectedRevenue: Math.round(forecastNext),
-      projectedPct: Math.round(projectedPct * 10) / 10,
+      projectedPct: projectedPct !== null ? Math.round(projectedPct * 10) / 10 : null,
       totalSessions,
       totalRevenue,
       avgDailyRevenue: Math.round(avgDailyRevenue),
@@ -566,8 +648,12 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
         bookings: topService.bookings,
         category: topService.category,
       },
-      reorderAlerts: inventoryItems.filter((item) => item.status === 'Critical').length,
-      modelFit: `${serviceForecasts.length > 0 ? Math.round(serviceForecasts.reduce((sum, item) => sum + parseFloat(item.mape), 0) / serviceForecasts.length) : 0}%`,
+      reorderAlerts: restockList.length,
+      modelFit: serviceForecasts.length > 0
+        ? serviceForecasts.every((item) => Number.isFinite(parseFloat(item.mape)))
+          ? `${Math.round(serviceForecasts.reduce((sum, item) => sum + parseFloat(item.mape), 0) / serviceForecasts.length)}%`
+          : 'Insufficient service history'
+        : 'Insufficient service history',
     },
     topServices,
     restockList,
@@ -579,8 +665,9 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
     confidenceBand,
     dataAvailability: {
       timeOfDayFillRate: 0,
-      inventoryHasReorderPoints: inventoryItems.some((item) => item.reorderPoint > 0),
-      inventoryHasUnitCost: inventoryItems.some((item) => item.unitCost > 0),
+      inventoryHasReorderPoints: inventoryItems.some((item) => item.reorderPoint !== null),
+      inventoryHasUnitCost: inventoryItems.some((item) => item.unitCost !== null),
+      expenseDataAvailable: hasExpenseData,
       dateRangeMonths: Math.max(1, Math.round(labels.length / 4)),
       expenseCategoriesTracked: expenseBreakdown.map((item) => item.category),
     },
@@ -617,7 +704,7 @@ const getDashboardDataCached = cache(
       (uid: string, opts?: DashboardDataOptions) => getDashboardDataForUser(uid, opts),
       cacheKey,
       {
-        revalidate: 60,
+        revalidate: 15,
         tags: [buildDashboardDataTag(userId, businessId)],
       }
     )
@@ -677,6 +764,126 @@ export async function getServiceByWeekday(userId: string, options?: DashboardDat
 export async function getExpenseCategoryBreakdown(userId: string, options?: DashboardDataOptions) {
   const data = await getSupabaseDashboardData(userId, options)
   return data.expenseBreakdown ?? []
+}
+
+function parseMonthKey(month: unknown) {
+  if (typeof month !== 'string') return null
+  const [year, mon] = month.split('-').map((value) => Number(value))
+  if (!Number.isFinite(year) || !Number.isFinite(mon) || mon < 1 || mon > 12) return null
+  return year * 12 + mon - 1
+}
+
+function buildYearOverYearUsage(history: Array<{ month: string | null; used: number }>) {
+  const monthlyUsage = new Map<number, number>()
+  let latestIndex: number | null = null
+
+  for (const row of history) {
+    const idx = parseMonthKey(row.month)
+    if (idx === null) continue
+    monthlyUsage.set(idx, (monthlyUsage.get(idx) ?? 0) + Number(row.used ?? 0))
+    latestIndex = latestIndex === null ? idx : Math.max(latestIndex, idx)
+  }
+
+  if (latestIndex === null) {
+    return {
+      lastYearUsage: 0,
+      priorYearUsage: 0,
+      changePct: 0,
+      trend: 'flat' as const,
+    }
+  }
+
+  let lastYearUsage = 0
+  let priorYearUsage = 0
+  for (let offset = 0; offset < 12; offset += 1) {
+    const targetMonth = latestIndex - offset
+    if (targetMonth < 0) break
+    lastYearUsage += monthlyUsage.get(targetMonth) ?? 0
+    priorYearUsage += monthlyUsage.get(targetMonth - 12) ?? 0
+  }
+
+  const changePct = priorYearUsage > 0
+    ? Math.round(((lastYearUsage - priorYearUsage) / priorYearUsage) * 100)
+    : lastYearUsage > 0
+      ? 100
+      : 0
+
+  const trend = lastYearUsage > priorYearUsage ? 'increase' : lastYearUsage < priorYearUsage ? 'decrease' : 'flat'
+
+  return { lastYearUsage, priorYearUsage, changePct, trend }
+}
+
+function buildInventoryAnalyticsFromRows(inventoryItems: Array<InventoryRow>) {
+  const items = inventoryItems.map((item) => {
+    const history = item.history ?? []
+    const totalUsed = history.reduce((sum, row) => sum + Number(row.used ?? 0), 0)
+    const validMonthKeys = new Set(
+      history
+        .map((row) => row.month)
+        .filter((month): month is string => typeof month === 'string' && parseMonthKey(month) !== null)
+    )
+    const monthCount = validMonthKeys.size
+    const avgMonthlyUsage = monthCount > 0 ? totalUsed / monthCount : 0
+    const recentUsed = history.at(-1)?.used ?? 0
+    const yoy = buildYearOverYearUsage(history)
+
+    return {
+      name: item.name,
+      supplier: item.supplier ?? '',
+      currentStock: item.stock ?? 0,
+      reorderPoint: item.reorder_point ?? item.reorderPoint ?? 0,
+      daysOfCover: item.daysOfCover ?? 0,
+      status: item.status ?? 'Unknown',
+      projectedNextMonth: item.projectedNextMonth ?? 0,
+      avgMonthlyUsage,
+      totalUsed,
+      recentUsed,
+      monthsTracked: monthCount,
+      yearOverYear: yoy,
+      history: history
+        .filter((row) => typeof row.month === 'string' && parseMonthKey(row.month) !== null)
+        .slice(-12)
+        .map((row) => ({ month: row.month ?? null, used: Number(row.used ?? 0) })),
+    }
+  })
+
+  const sortedByUsage = items.slice().sort((a, b) => b.totalUsed - a.totalUsed)
+  const sortedByRisk = items.slice().sort((a, b) => (a.daysOfCover ?? Number.POSITIVE_INFINITY) - (b.daysOfCover ?? Number.POSITIVE_INFINITY))
+  const topYoY = items
+    .filter((item) => item.monthsTracked >= 6)
+    .sort((a, b) => Math.abs(b.yearOverYear.changePct) - Math.abs(a.yearOverYear.changePct))
+
+  return {
+    trackedSKUCount: items.length,
+    hasInventoryHistory: items.some((item) => item.monthsTracked > 1),
+    topUsageItems: sortedByUsage.slice(0, 5).map((item) => ({
+      name: item.name,
+      totalUsed: item.totalUsed,
+      avgMonthlyUsage: Math.round(item.avgMonthlyUsage),
+      recentUsed: item.recentUsed,
+      currentStock: item.currentStock,
+      status: item.status,
+    })),
+    reorderPriorityItems: sortedByRisk.slice(0, 6).map((item) => ({
+      name: item.name,
+      currentStock: item.currentStock,
+      daysOfCover: item.daysOfCover,
+      projectedNextMonth: item.projectedNextMonth,
+      status: item.status,
+    })),
+    yearOverYearUsage: topYoY.slice(0, 5).map((item) => ({
+      name: item.name,
+      priorYearUsage: item.yearOverYear.priorYearUsage,
+      lastYearUsage: item.yearOverYear.lastYearUsage,
+      changePct: item.yearOverYear.changePct,
+      trend: item.yearOverYear.trend,
+    })),
+  }
+}
+
+export async function getInventoryAnalytics(userId: string, options?: DashboardDataOptions) {
+  const data = await getSupabaseDashboardData(userId, options)
+  return buildInventoryAnalyticsFromRows((data.inventoryItems ?? []) as InventoryRow[])
 }
 
 export async function getInventoryConsumptionSignal(userId: string, options?: DashboardDataOptions) {

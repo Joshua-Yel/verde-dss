@@ -1,6 +1,15 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer } from '@/src/lib/supabaseServer';
 
+async function resolveSingleExistingBusinessId() {
+  const { data, error } = await supabaseServer.from('businesses').select('id').limit(2);
+  if (error || !data || data.length !== 1) {
+    return null;
+  }
+
+  return data[0]?.id ?? null;
+}
+
 export async function POST(request: Request) {
   try {
     const { name, email, password } = await request.json();
@@ -22,15 +31,58 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: authError?.message ?? 'Unable to create account.' }, { status: 400 });
     }
 
-    const { error: profileError } = await supabaseServer
-  .from("businesses")
-  .insert({
-    owner_id: authData.user.id,
-    name,
-  });
+    const assignedBusinessId = await resolveSingleExistingBusinessId();
 
-    if (profileError) {
-      return NextResponse.json({ error: profileError.message }, { status: 400 });
+    try {
+      await supabaseServer.from('user_profiles').upsert(
+        {
+          id: authData.user.id,
+          email,
+          salon_name: name,
+          role: 'user',
+          is_admin: false,
+          is_active: true,
+          workspace_id: assignedBusinessId,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' }
+      );
+    } catch {
+      // Best effort: preserve signup even if profile table is unavailable.
+    }
+
+    if (assignedBusinessId) {
+      try {
+        const nextUserMetadata = {
+          ...(authData.user.user_metadata ?? {}),
+          salon_name: name,
+          business_id: assignedBusinessId,
+          workspace_id: assignedBusinessId,
+        };
+
+        await supabaseServer.auth.admin.updateUserById(authData.user.id, {
+          user_metadata: nextUserMetadata,
+        });
+      } catch {
+        // Continue even if auth metadata sync fails.
+      }
+
+      try {
+        await supabaseServer.from('workspace_members').upsert(
+          {
+            workspace_id: assignedBusinessId,
+            user_id: authData.user.id,
+            role: 'user',
+            is_active: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'workspace_id,user_id' }
+        );
+      } catch {
+        // Best effort only.
+      }
     }
 
     return NextResponse.json({ success: true, user: authData.user });

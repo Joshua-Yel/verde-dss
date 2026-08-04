@@ -42,31 +42,39 @@ async function InventoryContent() {
   const recommendations = hasInventoryData
     ? inventoryItems
         .map((item) => {
-          const daysOfCover = item.daysOfCover ?? Number.POSITIVE_INFINITY;
-          const criticalThreshold = 14;
-          const status = daysOfCover < criticalThreshold ? 'Critical' : daysOfCover < 30 ? 'Low' : 'Healthy';
-          const badgeStyle = status === 'Critical'
-            ? 'text-destructive bg-destructive/10 border-destructive/20'
-            : status === 'Low'
-              ? 'text-amber-700 dark:text-amber-400 bg-amber-500/10 border-amber-500/20'
-              : 'text-zinc-600 dark:text-zinc-400 bg-zinc-500/10 border-zinc-500/20';
-          const reorderQuantity = Math.max(0, Math.round((60 * Math.max(item.consumptionRate ?? 0, 1)) - (item.stock ?? 0)));
+          const reorderPoint = item.reorderPoint
+          const hasReorderPoint = reorderPoint !== null && reorderPoint !== undefined
+          const status = hasReorderPoint
+            ? item.stock <= reorderPoint
+              ? 'At or below reorder point'
+              : 'Above reorder point'
+            : 'Reorder point unavailable'
+          const badgeStyle = hasReorderPoint
+            ? item.stock <= reorderPoint
+              ? 'text-destructive bg-destructive/10 border-destructive/20'
+              : 'text-zinc-600 dark:text-zinc-400 bg-zinc-500/10 border-zinc-500/20'
+            : 'text-muted-foreground bg-muted/10 border-border'
+          const reorderQuantity = hasReorderPoint ? Math.max(0, Math.round(reorderPoint - (item.stock ?? 0))) : null
           return {
             item: item.name,
             supplier: item.supplier,
             stock: item.stock,
-            rp: item.reorderPoint,
-            cover: Number.isFinite(daysOfCover) ? `${Math.max(1, Math.round(daysOfCover))}d` : '∞',
+            rp: reorderPoint,
+            cover: item.daysOfCover !== null && item.daysOfCover !== undefined ? `${Math.max(1, Math.round(item.daysOfCover ?? 0))}d` : 'Unavailable',
             status,
             badgeStyle,
             reorderQuantity,
+            projectedNextMonth: item.projectedNextMonth,
+            avgMonthlyUsage: item.avgMonthlyUsage,
           };
         })
-        .sort((left, right) => left.stock - right.stock)
+        .sort((left, right) => (left.rp ?? Number.MAX_SAFE_INTEGER) - (right.rp ?? Number.MAX_SAFE_INTEGER))
     : [];
 
-  const criticalCount = recommendations.filter((item) => item.status === 'Critical').length;
-  const suggestedOrderTotal = recommendations.filter((item) => item.status === 'Critical').reduce((sum, item) => sum + item.reorderQuantity, 0);
+  const criticalCount = recommendations.filter((item) => item.status === 'At or below reorder point').length;
+  const suggestedOrderTotal = recommendations
+    .filter((item) => item.reorderQuantity !== null)
+    .reduce((sum, item) => sum + (item.reorderQuantity ?? 0), 0);
 
   return (
     <>
@@ -141,26 +149,26 @@ async function InventoryContent() {
       <div className="p-5 rounded-xl border border-border bg-card shadow-xs">
         <div className="pb-4 mb-3 border-b border-border/40 flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-semibold tracking-tight text-foreground">Reorder Recommendations</h3>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">Items that will run out before their next scheduled delivery.</p>
+            <h3 className="text-sm font-semibold tracking-tight text-foreground">Next-Month Inventory Forecast</h3>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">Projected closing stock based on recent monthly usage, with reorder risk flagged automatically.</p>
           </div>
         </div>
 
         {hasInventoryData ? (
           <div className="overflow-x-auto">
             <SmallTable
-              columns={["Item", "Supplier", "Stock On-Hand", "Days of Cover", "Status", "Suggested Qty"]}
+              columns={["Item", "Supplier", "Current Stock", "Avg / Month", "Forecast Next Month", "Status"]}
               rows={recommendations.map((row) => ({
                 Item: <span className="font-medium text-foreground text-xs block max-w-[200px] truncate">{row.item}</span>,
                 Supplier: <span className="text-muted-foreground text-xs">{row.supplier}</span>,
-                'Stock On-Hand': <span className={`font-mono text-xs font-semibold text-right ${row.status === 'Critical' ? 'text-destructive' : 'text-muted-foreground'}`}>{row.stock} units</span>,
-                'Days of Cover': <span className="font-mono font-medium text-xs text-primary text-right">{row.cover}</span>,
+                'Current Stock': <span className={`font-mono text-xs font-semibold text-right ${row.status === 'At or below reorder point' ? 'text-destructive' : 'text-muted-foreground'}`}>{row.stock} units</span>,
+                'Avg / Month': <span className="font-mono font-medium text-xs text-primary text-right">{row.avgMonthlyUsage !== undefined && row.avgMonthlyUsage !== null ? Math.round(row.avgMonthlyUsage) : 'Insufficient history'} units</span>,
+                'Forecast Next Month': <span className="font-mono text-xs text-muted-foreground/80 text-right">{row.projectedNextMonth !== null && row.projectedNextMonth !== undefined ? `${Math.round(row.projectedNextMonth)} units` : 'Insufficient history'}</span>,
                 Status: (
                   <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border inline-block min-w-[65px] text-center ${row.badgeStyle}`}>
                     {row.status}
                   </span>
                 ),
-                'Suggested Qty': <span className="font-mono text-xs text-muted-foreground/80 text-right">{row.reorderQuantity} units</span>,
               }))}
             />
           </div>

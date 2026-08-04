@@ -22,11 +22,34 @@ export function wma(values: number[], weights?: number[]) {
 
 export type ForecastModel = 'wma' | 'sma' | 'naive'
 
-function predictNext(values: number[], model: ForecastModel, window = 3, weights?: number[]) {
-  if (values.length === 0) return 0
-  const history = values.slice(-Math.max(1, Math.min(window, values.length)))
+function cleanedValues(values: number[]) {
+  return values.filter((value) => Number.isFinite(value))
+}
+
+function seasonallyAdjustedNaive(values: number[], seasonLength: number) {
+  if (seasonLength <= 0 || values.length < seasonLength) {
+    return values[values.length - 1] ?? 0
+  }
+
+  const latestSeasonIndex = values.length - seasonLength
+  if (latestSeasonIndex < 0) {
+    return values[values.length - 1] ?? 0
+  }
+
+  return values[latestSeasonIndex]
+}
+
+function predictNext(values: number[], model: ForecastModel, window = 3, weights?: number[], seasonLength = 0) {
+  const series = cleanedValues(values)
+  if (series.length === 0) return 0
+  if (series.length === 1) return series[0]
+
+  const history = series.slice(-Math.max(1, Math.min(window, series.length)))
 
   if (model === 'naive') {
+    if (seasonLength > 0 && series.length >= seasonLength * 2) {
+      return seasonallyAdjustedNaive(series, seasonLength)
+    }
     return history[history.length - 1] ?? 0
   }
 
@@ -37,13 +60,17 @@ function predictNext(values: number[], model: ForecastModel, window = 3, weights
   return wma(history, weights)
 }
 
-export function forecastSeriesForModel(values: number[], horizon = 3, window = 3, model: ForecastModel = 'wma', weights?: number[]) {
-  const out = [...values]
+export function forecastSeriesForModel(values: number[], horizon = 3, window = 3, model: ForecastModel = 'wma', weights?: number[], seasonLength = 0) {
+  const out = cleanedValues(values)
+  const forecast: number[] = []
+
   for (let h = 0; h < horizon; h++) {
-    const pred = predictNext(out, model, window, weights)
+    const pred = predictNext(out, model, window, weights, seasonLength)
+    forecast.push(pred)
     out.push(pred)
   }
-  return out.slice(values.length)
+
+  return forecast
 }
 
 export function forecastSeries(values: number[], horizon = 3, window = 3, weights?: number[]) {

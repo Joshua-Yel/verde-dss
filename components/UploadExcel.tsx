@@ -524,7 +524,12 @@ export default function UploadExcel() {
         setResultMessage(body.message || `Excellent! ${mappedRows.length} rows have been checked and successfully imported.`);
         setStep('done');
       } else {
-        setError(body.error || "The server rejected this submission. Please verify file columns and try uploading again.");
+        const errorMessage =
+          typeof body.error === 'string' ? body.error :
+          typeof body.message === 'string' ? body.message :
+          body.detail ? String(body.detail) :
+          JSON.stringify(body);
+        setError(errorMessage || "The server rejected this submission. Please verify file columns and try uploading again.");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Network error — please check your connection and try again.');
