@@ -2,9 +2,13 @@ type SupabaseMutationResult = {
   error?: { message?: string | null } | null;
 };
 
+type SupabaseInsertOperation =
+  | SupabaseMutationResult
+  | PromiseLike<SupabaseMutationResult>;
+
 type SupabaseInsertClient = {
   from: (table: string) => {
-    insert: (rows: Array<Record<string, unknown>>) => Promise<SupabaseMutationResult>;
+    insert: (rows: Array<Record<string, unknown>>) => SupabaseInsertOperation;
   };
 };
 

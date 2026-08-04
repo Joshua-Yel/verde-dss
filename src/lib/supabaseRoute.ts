@@ -43,7 +43,7 @@ export async function createInstrumentedSupabaseRouteClient() {
     }
   };
 
-  const handler: ProxyHandler<unknown> = {
+  const handler: ProxyHandler<object> = {
     get(target, prop, receiver) {
       const orig = Reflect.get(target, prop, receiver);
       if (prop === 'from' && typeof orig === 'function') {
@@ -89,5 +89,5 @@ export async function createInstrumentedSupabaseRouteClient() {
     },
   };
 
-  return new Proxy(client, handler);
+  return new Proxy(client as object, handler) as unknown as typeof client;
 }

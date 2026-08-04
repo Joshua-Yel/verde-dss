@@ -26,6 +26,13 @@ export function getAssignedBusinessId(user: BusinessScopedUser | null | undefine
   const appMetadata = user?.app_metadata ?? {};
   const userMetadata = user?.user_metadata ?? {};
 
+  const appBusiness = (appMetadata?.business ?? null) as Record<string, unknown> | null;
+  const appWorkspace = (appMetadata?.workspace ?? null) as Record<string, unknown> | null;
+  const appProject = (appMetadata?.project ?? null) as Record<string, unknown> | null;
+  const userBusiness = (userMetadata?.business ?? null) as Record<string, unknown> | null;
+  const userWorkspace = (userMetadata?.workspace ?? null) as Record<string, unknown> | null;
+  const userProject = (userMetadata?.project ?? null) as Record<string, unknown> | null;
+
   const assignedBusinessId = readFirstStringValue([
     appMetadata?.business_id,
     appMetadata?.businessId,
@@ -33,18 +40,18 @@ export function getAssignedBusinessId(user: BusinessScopedUser | null | undefine
     appMetadata?.workspaceId,
     appMetadata?.project_id,
     appMetadata?.projectId,
-    appMetadata?.business?.id,
-    appMetadata?.workspace?.id,
-    appMetadata?.project?.id,
+    appBusiness?.id,
+    appWorkspace?.id,
+    appProject?.id,
     userMetadata?.business_id,
     userMetadata?.businessId,
     userMetadata?.workspace_id,
     userMetadata?.workspaceId,
     userMetadata?.project_id,
     userMetadata?.projectId,
-    userMetadata?.business?.id,
-    userMetadata?.workspace?.id,
-    userMetadata?.project?.id,
+    userBusiness?.id,
+    userWorkspace?.id,
+    userProject?.id,
   ]);
 
   return assignedBusinessId || null;

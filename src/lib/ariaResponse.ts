@@ -1,4 +1,4 @@
-import { forecastSeriesForModel } from '../../lib/forecast/wma.ts';
+import { forecastSeriesForModel } from '../../lib/forecast/wma';
 
 export type AriaContextPayload = {
   analyticsContext?: Record<string, unknown>;
