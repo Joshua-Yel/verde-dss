@@ -25,13 +25,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
 
     const role = getUserRole(session.user as { app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown> } | null);
-    const accessMap: Record<string, 'overview' | 'service-demand' | 'inventory' | 'financials' | 'staffing' | 'admin'> = {
+    const accessMap: Record<string, 'overview' | 'service-demand' | 'inventory' | 'financials' | 'staffing' | 'admin' | 'settings'> = {
       '/': 'overview',
       '/service-demand': 'service-demand',
       '/inventory': 'inventory',
       '/financials': 'financials',
       '/staffing': 'staffing',
       '/admin': 'admin',
+      '/settings': 'settings',
     };
 
     const module = accessMap[pathname] ?? 'overview';

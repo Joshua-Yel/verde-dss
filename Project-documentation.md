@@ -167,6 +167,10 @@ the system, and how the major workflows operate end to end.
 
 ```
 Role What they can do
+
+Note: Owner/admin/User are the one who can wiew all tabs, other roles can only view their own respective tabs
+
+
 Owner/Admin Full access: manage users, edit all data, configure services/inventory items, view all
 reports, manage business settings
 Staff/Manager Enter daily operations data, view dashboards and forecasts, generate reports, cannot
@@ -480,3 +484,12 @@ This reflects my current understanding of what we're building, based on our disc
 group to review it and confirm we're aligned, especially on the PWA-vs-native decision in Section 9, since that's the
 one place where what was originally asked for and what I think is realistically achievable by July 18 don't perfectly
 match.
+
+### Implementation corrective note
+
+Before the settings UI rebuild starts, two correctness issues must be addressed first:
+
+1. The reset route must never delete the `businesses` row or the service/inventory catalog. It should only clear transactional data for the current `business_id`, specifically `daily_operations`, `service_sales`, `inventory_records`, `expenses`, `forecast_snapshots`, and `imports`. It must not touch `businesses`, `services`, `inventory_items`, or `users`.
+2. The real user directory table in this codebase is `user_profiles`, not a generic `users` table. The Users & Access section should query `user_profiles` joined to the authenticated user metadata instead of assuming a `users` table exists.
+
+This is not cosmetic cleanup — both are correctness issues that directly affect data integrity and whether the settings section can load the correct user list.

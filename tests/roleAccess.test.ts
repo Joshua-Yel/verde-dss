@@ -21,3 +21,10 @@ test('staff users can reach staffing and overview modules only', () => {
   assert.match(source, /module === 'overview'/);
   assert.match(source, /return module === 'staffing'/);
 });
+
+test('owner and admin accounts can access settings while staff users cannot', () => {
+  assert.match(source, /module === 'settings'/);
+  assert.match(source, /normalized === 'admin' \|\| normalized === 'owner'/);
+  assert.match(source, /normalized === 'staff'/);
+  assert.match(source, /return module === 'staffing'/);
+});

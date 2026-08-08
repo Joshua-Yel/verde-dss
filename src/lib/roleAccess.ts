@@ -1,5 +1,7 @@
 export type UserRole = 'owner' | 'admin' | 'finance' | 'staff' | 'inventory' | 'user';
 
+export type AppModule = 'overview' | 'service-demand' | 'inventory' | 'financials' | 'staffing' | 'admin' | 'settings';
+
 const ROLE_LABELS: Record<UserRole, string> = {
   owner: 'Owner',
   admin: 'Admin',
@@ -59,14 +61,14 @@ export function isAdminRole(role: UserRole | string | null | undefined) {
   return normalized === 'admin' || normalized === 'owner';
 }
 
-export function canAccessModule(role: UserRole | string | null | undefined, module: 'overview' | 'service-demand' | 'inventory' | 'financials' | 'staffing' | 'admin') {
+export function canAccessModule(role: UserRole | string | null | undefined, module: AppModule) {
   const normalized = normalizeUserRole(role);
 
   if (module === 'overview') {
     return true;
   }
 
-  if (module === 'admin') {
+  if (module === 'admin' || module === 'settings') {
     return normalized === 'admin' || normalized === 'owner';
   }
 
@@ -93,6 +95,6 @@ export function canAccessModule(role: UserRole | string | null | undefined, modu
   return true;
 }
 
-export function canAccessFeature(role: UserRole | string | null | undefined, feature: 'overview' | 'service-demand' | 'inventory' | 'financials' | 'staffing' | 'admin') {
+export function canAccessFeature(role: UserRole | string | null | undefined, feature: AppModule) {
   return canAccessModule(role, feature);
 }

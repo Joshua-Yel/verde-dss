@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   Download,
   FileDown,
+  Settings,
 } from "lucide-react";
 import { getConfiguredAdminEmails } from '@/src/lib/adminEmails';
 import { getUserRole, canAccessModule } from '@/src/lib/roleAccess';
@@ -63,6 +64,7 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
     ...(canAccessModule(role, 'financials') ? [{ label: "Financials", href: "/financials", icon: PhilippinePeso }] : []),
     ...(canAccessModule(role, 'staffing') ? [{ label: "Staffing", href: "/staffing", icon: Users }] : []),
     ...(canAccessModule(role, 'admin') ? [{ label: "Admin", href: "/admin", icon: ShieldCheck }] : []),
+    ...(canAccessModule(role, 'settings') ? [{ label: "Settings", href: "/settings", icon: Settings }] : []),
   ]
 
   const router = useRouter()
