@@ -337,7 +337,7 @@ export default function UploadExcel() {
       setStep('map');
     } else {
       setParsed([]);
-      setError('We couldn’t find any data sheets inside this Excel file.');
+      setError('We couldn\'t find any data sheets inside this Excel file.');
     }
   };
 
@@ -358,7 +358,7 @@ export default function UploadExcel() {
     ? [
         { id: 'product', label: 'Product Name', value: productKey, set: setProductKey, required: true },
         { id: 'unit', label: 'Unit', value: unitKey, set: setUnitKey, required: true },
-        { id: 'month', label: 'Month (YYYY-MM-DD)', value: monthKey, set: setMonthKey, required: true },
+        { id: 'month', label: 'Month (YYYY-MM)', value: monthKey, set: setMonthKey, required: true },
         { id: 'opening', label: 'Opening Stock', value: openingKey, set: setOpeningKey, required: true },
         { id: 'purchased', label: 'Purchased', value: purchasedKey, set: setPurchasedKey, required: true },
         { id: 'used', label: 'Used', value: usedKey, set: setUsedKey, required: true },
@@ -459,7 +459,6 @@ export default function UploadExcel() {
     productKey, unitKey, monthKey, openingKey, purchasedKey, usedKey, closingKey, supplierKey, reorderPointKey, unitCostKey, statusKey, notesKey, businessKey,
   ]);
 
-  // Deep structural file row validations
   const validationErrors: ValidationError[] = useMemo(() => {
     if (!parsed || step !== 'map') return [];
     const errors: ValidationError[] = [];
@@ -552,140 +551,141 @@ export default function UploadExcel() {
   };
 
   return (
-    <Card className="w-full max-w-4xl mx-auto overflow-hidden py-0 transition-all duration-300">
+    <Card className="w-full max-w-7xl mx-auto overflow-hidden transition-all duration-300">
       {/* Progress stepper */}
       {step !== 'done' && (
-        <div className="flex items-center gap-2 border-b bg-muted/30 px-5 py-4 sm:px-8">
+        <div className="flex items-center gap-1 sm:gap-2 border-b bg-muted/30 px-2 py-2 sm:px-4 md:px-6 overflow-x-auto">
           {STEPS.map((s, i) => (
-            <div key={s.id} className="flex flex-1 items-center gap-2 last:flex-initial">
-              <div className="flex items-center gap-2">
+            <div key={s.id} className="flex flex-1 items-center gap-1 sm:gap-2 last:flex-initial min-w-0 whitespace-nowrap">
+              <div className="flex items-center gap-1 sm:gap-2 min-w-0">
                 <div
                   className={[
-                    "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-medium transition-colors",
+                    "flex h-6 w-6 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-full text-[10px] sm:text-xs font-medium transition-colors",
                     i < stepIndex ? "bg-emerald-600 text-white" :
                     i === stepIndex ? "bg-primary text-primary-foreground ring-4 ring-primary/15" :
                     "bg-muted text-muted-foreground",
                   ].join(' ')}
                 >
-                  {i < stepIndex ? <Check className="h-4 w-4" /> : i + 1}
+                  {i < stepIndex ? <Check className="h-3 w-3 sm:h-3.5 sm:w-3.5" /> : i + 1}
                 </div>
-                <span className={`hidden text-sm sm:inline ${i === stepIndex ? 'font-medium' : 'text-muted-foreground'}`}>
+                <span className={`hidden sm:inline text-xs truncate ${i === stepIndex ? 'font-medium' : 'text-muted-foreground'}`}>
                   {s.label}
                 </span>
               </div>
               {i < STEPS.length - 1 && (
-                <div className={`mx-1 h-px flex-1 ${i < stepIndex ? 'bg-emerald-600' : 'bg-border'}`} />
+                <div className={`mx-0.5 sm:mx-1 h-px flex-1 min-w-[8px] ${i < stepIndex ? 'bg-emerald-600' : 'bg-border'}`} />
               )}
             </div>
           ))}
         </div>
       )}
 
-      <CardContent className="p-5 sm:p-8">
+      <CardContent className="p-3 sm:p-4">
         {/* STEP 1 — Upload */}
         {step === 'upload' && (
-          <div className="space-y-6 max-w-2xl mx-auto">
-            <div>
-              <h2 className="text-lg font-semibold">What kind of data are you importing?</h2>
-              <p className="mt-1 text-sm text-muted-foreground">This tells us which columns to look for.</p>
+          <div className="space-y-3 sm:space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-base sm:text-lg font-semibold">What kind of data are you importing?</h2>
+                <p className="mt-0.5 text-xs sm:text-sm text-muted-foreground">This tells us which columns to look for.</p>
+              </div>
             </div>
 
-            <div className="rounded-lg border bg-muted/20 p-3 text-sm">
-              <p className="font-medium text-foreground">
-                {importMode === 'operations' ? 'Expected template columns' : 'Expected template columns'}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {importMode === 'expenses' ? 'Allowed expense categories are Payroll, Rent, Utilities, Supplies, Marketing, Admin, and Other.' : null}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {importMode === 'operations'
-                  ? 'Date, Service Name, Quantity, Revenue (PHP), Category, Unit Price (PHP), Time of Day, Notes, Business Name'
-                  : importMode === 'expenses'
-                    ? 'Date, Category, Amount (PHP), Notes, Business Name'
-                    : 'Product Name, Unit, Month, Opening Stock, Purchased, Used, Closing Stock, Status, Notes, Business Name'}
-              </p>
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-2 sm:gap-3 items-stretch">
+              <div className="lg:col-span-2 flex flex-row lg:flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => setImportMode('operations')}
+                  className={[
+                    "flex-1 flex items-center gap-2 rounded-lg border-2 p-2 text-left transition-colors touch-manipulation min-h-[44px] lg:min-h-[52px]",
+                    importMode === 'operations' ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/30 active:bg-muted/40",
+                  ].join(' ')}
+                >
+                  <Receipt className="h-4 w-4 lg:h-5 lg:w-5 shrink-0 text-primary" />
+                  <div className="min-w-0">
+                    <p className="text-xs lg:text-sm font-medium leading-tight">Operations</p>
+                    <p className="text-[10px] lg:text-xs text-muted-foreground leading-tight hidden sm:block">Sales & revenue</p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setImportMode('inventory')}
+                  className={[
+                    "flex-1 flex items-center gap-2 rounded-lg border-2 p-2 text-left transition-colors touch-manipulation min-h-[44px] lg:min-h-[52px]",
+                    importMode === 'inventory' ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/30 active:bg-muted/40",
+                  ].join(' ')}
+                >
+                  <Boxes className="h-4 w-4 lg:h-5 lg:w-5 shrink-0 text-primary" />
+                  <div className="min-w-0">
+                    <p className="text-xs lg:text-sm font-medium leading-tight">Inventory</p>
+                    <p className="text-[10px] lg:text-xs text-muted-foreground leading-tight hidden sm:block">Stock levels</p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setImportMode('expenses')}
+                  className={[
+                    "flex-1 flex items-center gap-2 rounded-lg border-2 p-2 text-left transition-colors touch-manipulation min-h-[44px] lg:min-h-[52px]",
+                    importMode === 'expenses' ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/30 active:bg-muted/40",
+                  ].join(' ')}
+                >
+                  <Receipt className="h-4 w-4 lg:h-5 lg:w-5 shrink-0 text-primary" />
+                  <div className="min-w-0">
+                    <p className="text-xs lg:text-sm font-medium leading-tight">Expenses</p>
+                    <p className="text-[10px] lg:text-xs text-muted-foreground leading-tight hidden sm:block">Bills by date</p>
+                  </div>
+                </button>
+              </div>
+
+              <label className="lg:col-span-3 group relative flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/25 bg-muted/20 px-3 py-3 lg:px-4 lg:py-4 min-h-[120px] lg:min-h-[140px] text-center transition-colors hover:border-primary/50 active:bg-muted/30 touch-manipulation">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={onFile}
+                  className="absolute inset-0 cursor-pointer opacity-0"
+                />
+                <UploadCloud className="mb-1.5 h-6 w-6 lg:h-8 lg:w-8 text-muted-foreground transition-colors group-hover:text-primary" />
+                <p className="text-xs lg:text-sm font-medium">Drop Excel here, or tap to browse</p>
+                <p className="mt-0.5 text-[10px] lg:text-xs text-muted-foreground">Accepts .xlsx and .xls</p>
+              </label>
             </div>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <button
-                type="button"
-                onClick={() => setImportMode('operations')}
-                className={[
-                  "flex items-start gap-3 rounded-xl border-2 p-4 text-left transition-colors",
-                  importMode === 'operations' ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/30",
-                ].join(' ')}
-              >
-                <Receipt className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-                <div>
-                  <p className="text-sm font-medium">Operations</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">Sales, services, revenue by date</p>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setImportMode('inventory')}
-                className={[
-                  "flex items-start gap-3 rounded-xl border-2 p-4 text-left transition-colors",
-                  importMode === 'inventory' ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/30",
-                ].join(' ')}
-              >
-                <Boxes className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-                <div>
-                  <p className="text-sm font-medium">Inventory</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">Stock levels, purchases, usage by month</p>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setImportMode('expenses')}
-                className={[
-                  "flex items-start gap-3 rounded-xl border-2 p-4 text-left transition-colors",
-                  importMode === 'expenses' ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/30",
-                ].join(' ')}
-              >
-                <Receipt className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-                <div>
-                  <p className="text-sm font-medium">Expenses</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">Expenses / bills by date</p>
-                </div>
-              </button>
+            <div className="rounded-lg border bg-muted/20 px-3 py-1.5 text-[10px] sm:text-xs text-muted-foreground leading-snug">
+              <span className="font-medium text-foreground">Expected: </span>
+              {importMode === 'operations'
+                ? 'Date, Service Name, Quantity, Revenue (PHP) · optional: Category, Price, Time, Notes, Business'
+                : importMode === 'expenses'
+                  ? 'Date, Category, Amount (PHP) · optional: Notes, Business · categories: Payroll, Rent, Utilities, Supplies, Marketing, Admin, Other'
+                  : 'Product, Unit, Month, Opening / Purchased / Used / Closing · optional: Supplier, Cost, Status, Notes, Business'}
             </div>
-
-            <label className="group relative flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-muted-foreground/25 bg-muted/20 px-6 py-10 text-center transition-colors hover:border-primary/50">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,.xls"
-                onChange={onFile}
-                className="absolute inset-0 cursor-pointer opacity-0"
-              />
-              <UploadCloud className="mb-3 h-10 w-10 text-muted-foreground transition-colors group-hover:text-primary" />
-              <p className="text-sm font-medium">Drop your Excel file here, or tap to browse</p>
-              <p className="mt-1 text-xs text-muted-foreground">Accepts .xlsx and .xls files</p>
-            </label>
 
             {error && (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertTitle>Upload Problem</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
+              <Alert variant="destructive" className="py-2">
+                <AlertCircle className="h-3.5 w-3.5" />
+                <AlertTitle className="text-sm">Upload Problem</AlertTitle>
+                <AlertDescription className="text-xs">{error}</AlertDescription>
               </Alert>
             )}
           </div>
         )}
 
-        {/* STEP 2 — Map columns (LANDSCAPE SPLIT GRID WITH VALIDATION CHIPS) */}
+        {/* ============================================================
+            STEP 2 — Improved multi-column card layout
+            ============================================================ */}
         {step === 'map' && parsed && (
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b pb-4">
-              <div>
-                <h2 className="text-xl font-semibold tracking-tight">Match your columns</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  We auto-matched what we could from <span className="font-semibold text-foreground">{filename}</span>.
+          <div className="space-y-4">
+            {/* Header */}
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-base sm:text-lg font-semibold tracking-tight">Match your columns</h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Auto-matched from <span className="font-medium text-foreground">{filename}</span>
                 </p>
               </div>
+
               {sheetNames.length > 1 && (
                 <Select
                   value={selectedSheet ?? ''}
@@ -693,93 +693,114 @@ export default function UploadExcel() {
                     if (workbookRef.current && val) await loadSheet(val, workbookRef.current);
                   }}
                 >
-                  <SelectTrigger className="h-10 w-[180px] text-sm bg-background">
-                    <SelectValue placeholder="Select Sheet" />
+                  <SelectTrigger className="h-8 w-[160px] text-xs bg-background">
+                    <SelectValue placeholder="Select sheet" />
                   </SelectTrigger>
                   <SelectContent>
                     {sheetNames.map(name => (
-                      <SelectItem key={name} value={name}>{name}</SelectItem>
+                      <SelectItem key={name} value={name} className="text-xs">
+                        {name}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-              {/* Left Side: Required fields */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between px-1">
-                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Required Fields</span>
-                  <span className="text-xs font-medium text-muted-foreground">{requiredFields.filter(f => f.value).length}/{requiredFields.length} mapped</span>
-                </div>
-                <div className="space-y-2">
-                  {requiredFields.map(field => (
-                    <MappingRow key={field.id} field={field} columns={columns} />
-                  ))}
-                </div>
+            {/* REQUIRED */}
+            <div>
+              <div className="flex items-center gap-2 mb-2.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Required
+                </span>
+                <span className="text-[10px] font-medium bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 px-1.5 py-0.5 rounded-full">
+                  {requiredFields.filter(f => f.value).length}/{requiredFields.length}
+                </span>
               </div>
 
-              {/* Right Side: Optional fields */}
-              <div className="space-y-3">
-                <Collapsible open={showOptional} onOpenChange={setShowOptional} className="w-full">
-                  <div className="flex items-center justify-between px-1 mb-2">
-                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Optional Fields</span>
-                    <CollapsibleTrigger className="inline-flex h-6 items-center justify-center rounded-md px-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors">
-                      {showOptional ? 'Collapse' : 'Expand'} ({optionalFields.length})
-                      <ChevronDown className={`ml-1 h-3 w-3 transition-transform duration-200 ${showOptional ? 'rotate-180' : ''}`} />
-                    </CollapsibleTrigger>
-                  </div>
-                  
-                  <CollapsibleContent className="space-y-2">
-                    {optionalFields.map(field => (
-                      <MappingRow key={field.id} field={field} columns={columns} muted />
-                    ))}
-                  </CollapsibleContent>
-                </Collapsible>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                {requiredFields.map(field => (
+                  <MappingCard key={field.id} field={field} columns={columns} />
+                ))}
               </div>
             </div>
 
-            {/* Comprehensive Content/Data Quality Validation Block */}
-            {missingRequired.length === 0 && validationErrors.length > 0 && (
-              <Alert variant="destructive" className="bg-destructive/5 border-destructive/20 text-destructive">
-                <XCircle className="h-4 w-4" />
-                <AlertTitle className="font-semibold text-sm">We found some formatting issues inside your sheet</AlertTitle>
-                <AlertDescription className="mt-2 text-xs space-y-1">
-                  <p className="mb-2 opacity-90">Please map columns to match the requested structures or verify the row rows in your file:</p>
-                  <ScrollArea className="h-28 border rounded-lg p-2 bg-background/50 text-foreground">
-                    <ul className="list-disc pl-4 space-y-1">
-                      {validationErrors.map((err, idx) => (
-                        <li key={idx} className="text-muted-foreground text-[11px]">
-                          <span className="font-medium text-destructive">{err.message}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </ScrollArea>
-                </AlertDescription>
-              </Alert>
-            )}
+            {/* OPTIONAL */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowOptional(!showOptional)}
+                className="flex items-center gap-2 mb-2.5 group"
+              >
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground group-hover:text-foreground transition-colors">
+                  Optional
+                </span>
+                <span className="text-[10px] font-medium bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full">
+                  {optionalFields.filter(f => f.value).length}/{optionalFields.length}
+                </span>
+                <ChevronDown
+                  className={`h-3.5 w-3.5 text-muted-foreground transition-transform duration-200 ${
+                    showOptional ? 'rotate-180' : ''
+                  }`}
+                />
+              </button>
 
-            {missingRequired.length > 0 && (
-              <Alert className="bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400">
-                <AlertCircle className="h-4 w-4 text-amber-500" />
-                <AlertTitle className="font-medium">Columns still need matching</AlertTitle>
-                <AlertDescription className="text-xs opacity-90">
-                  Please specify mappings for: {missingRequired.join(', ')}
-                </AlertDescription>
-              </Alert>
-            )}
+              {showOptional && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                  {optionalFields.map(field => (
+                    <MappingCard key={field.id} field={field} columns={columns} muted />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Validation */}
+            <div className="space-y-2 pt-1">
+              {missingRequired.length === 0 && validationErrors.length > 0 && (
+                <Alert variant="destructive" className="py-2">
+                  <XCircle className="h-3.5 w-3.5" />
+                  <AlertTitle className="text-xs font-semibold">Data issues found</AlertTitle>
+                  <AlertDescription className="text-[10px]">
+                    <ScrollArea className="h-12 border rounded-md p-2 bg-background/50 mt-1">
+                      <ul className="list-disc pl-4 space-y-0.5">
+                        {validationErrors.slice(0, 4).map((err, idx) => (
+                          <li key={idx} className="text-muted-foreground text-[10px]">
+                            <span className="font-medium text-destructive">{err.message}</span>
+                          </li>
+                        ))}
+                        {validationErrors.length > 4 && (
+                          <li className="text-muted-foreground text-[10px]">
+                            +{validationErrors.length - 4} more issues
+                          </li>
+                        )}
+                      </ul>
+                    </ScrollArea>
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {missingRequired.length > 0 && (
+                <Alert className="bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400 py-2">
+                  <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
+                  <AlertTitle className="text-xs font-medium">Missing required mappings</AlertTitle>
+                  <AlertDescription className="text-[10px] opacity-90 mt-0.5">
+                    {missingRequired.join(', ')}
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
           </div>
         )}
 
-        {/* STEP 3 — Review & send */}
+        {/* STEP 3 — Review */}
         {step === 'review' && parsed && (
-          <div className="space-y-6">
+          <div className="space-y-4 sm:space-y-5">
             <div>
-              <h2 className="text-lg font-semibold">Ready to send</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Take a quick look before this goes in.</p>
+              <h2 className="text-base sm:text-lg font-semibold">Ready to send</h2>
+              <p className="mt-0.5 text-xs sm:text-sm text-muted-foreground">Quick look before importing</p>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
               <StatBox label="Rows" value={String(parsed.length)} />
               <StatBox
                 label="Import type"
@@ -788,44 +809,47 @@ export default function UploadExcel() {
               <StatBox label="File" value={filename ?? '—'} truncate />
             </div>
 
-            <div className="rounded-xl border">
-              <div className="border-b px-4 py-2.5">
-                <p className="text-sm font-medium">Sample of your data</p>
+            <div className="rounded-lg border overflow-hidden">
+              <div className="border-b px-3 py-2">
+                <p className="text-xs sm:text-sm font-medium">Sample of your data</p>
               </div>
-              <ScrollArea className="h-[220px]">
+              <ScrollArea className="h-[120px] sm:h-[140px] max-h-[25vh]">
                 <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        {requiredFields.map(f => <TableHead key={f.id} className="whitespace-nowrap">{f.label}</TableHead>)}
+                        {requiredFields.map(f => (
+                          <TableHead key={f.id} className="whitespace-nowrap text-[10px] sm:text-xs px-2 sm:px-3">
+                            {f.label}
+                          </TableHead>
+                        ))}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {previewRows.map((row, i) => (
                         <TableRow key={i}>
-                            {importMode === 'operations' ? (
+                          {importMode === 'operations' ? (
                             <>
-                              <TableCell className="whitespace-nowrap">{(row as OperationsMappedRow).date ?? '—'}</TableCell>
-                              <TableCell className="font-medium">{(row as OperationsMappedRow).service_name || '—'}</TableCell>
-                              <TableCell>{(row as OperationsMappedRow).quantity ?? '—'}</TableCell>
-                              <TableCell>{(row as OperationsMappedRow).revenue ?? '—'}</TableCell>
+                              <TableCell className="whitespace-nowrap text-[10px] sm:text-xs px-2 sm:px-3">{(row as OperationsMappedRow).date ?? '—'}</TableCell>
+                              <TableCell className="font-medium text-[10px] sm:text-xs px-2 sm:px-3">{(row as OperationsMappedRow).service_name || '—'}</TableCell>
+                              <TableCell className="text-[10px] sm:text-xs px-2 sm:px-3">{(row as OperationsMappedRow).quantity ?? '—'}</TableCell>
+                              <TableCell className="text-[10px] sm:text-xs px-2 sm:px-3">{(row as OperationsMappedRow).revenue ?? '—'}</TableCell>
                             </>
-                            ) : importMode === 'expenses' ? (
-                              <>
-                                <TableCell className="whitespace-nowrap">{(row as OperationsMappedRow).date ?? '—'}</TableCell>
-                                <TableCell className="font-medium">{(row as OperationsMappedRow).category || '—'}</TableCell>
-                                <TableCell>{(row as OperationsMappedRow).price ?? '—'}</TableCell>
-                                <TableCell>{(row as OperationsMappedRow).notes ?? '—'}</TableCell>
-                              </>
-                            ) : (
+                          ) : importMode === 'expenses' ? (
                             <>
-                              <TableCell className="font-medium">{(row as InventoryMappedRow).product_name || '—'}</TableCell>
-                              <TableCell>{(row as InventoryMappedRow).unit || '—'}</TableCell>
-                              <TableCell className="whitespace-nowrap">{(row as InventoryMappedRow).month ?? '—'}</TableCell>
-                              <TableCell>{(row as InventoryMappedRow).opening_stock ?? '—'}</TableCell>
-                              <TableCell>{(row as InventoryMappedRow).purchased ?? '—'}</TableCell>
-                              <TableCell>{(row as InventoryMappedRow).used ?? '—'}</TableCell>
-                              <TableCell>{(row as InventoryMappedRow).closing_stock ?? '—'}</TableCell>
+                              <TableCell className="whitespace-nowrap text-[10px] sm:text-xs px-2 sm:px-3">{(row as OperationsMappedRow).date ?? '—'}</TableCell>
+                              <TableCell className="font-medium text-[10px] sm:text-xs px-2 sm:px-3">{(row as OperationsMappedRow).category || '—'}</TableCell>
+                              <TableCell className="text-[10px] sm:text-xs px-2 sm:px-3">{(row as OperationsMappedRow).price ?? '—'}</TableCell>
+                            </>
+                          ) : (
+                            <>
+                              <TableCell className="font-medium text-[10px] sm:text-xs px-2 sm:px-3">{(row as InventoryMappedRow).product_name || '—'}</TableCell>
+                              <TableCell className="text-[10px] sm:text-xs px-2 sm:px-3">{(row as InventoryMappedRow).unit || '—'}</TableCell>
+                              <TableCell className="whitespace-nowrap text-[10px] sm:text-xs px-2 sm:px-3">{(row as InventoryMappedRow).month ?? '—'}</TableCell>
+                              <TableCell className="text-[10px] sm:text-xs px-2 sm:px-3">{(row as InventoryMappedRow).opening_stock ?? '—'}</TableCell>
+                              <TableCell className="text-[10px] sm:text-xs px-2 sm:px-3">{(row as InventoryMappedRow).purchased ?? '—'}</TableCell>
+                              <TableCell className="text-[10px] sm:text-xs px-2 sm:px-3">{(row as InventoryMappedRow).used ?? '—'}</TableCell>
+                              <TableCell className="text-[10px] sm:text-xs px-2 sm:px-3">{(row as InventoryMappedRow).closing_stock ?? '—'}</TableCell>
                             </>
                           )}
                         </TableRow>
@@ -837,60 +861,65 @@ export default function UploadExcel() {
             </div>
 
             {error && (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertTitle>Import failed</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
+              <Alert variant="destructive" className="py-2">
+                <AlertCircle className="h-3.5 w-3.5" />
+                <AlertTitle className="text-sm">Import failed</AlertTitle>
+                <AlertDescription className="text-xs">{error}</AlertDescription>
               </Alert>
             )}
           </div>
         )}
 
-        {/* DONE — confirmation (STANDARDIZED EMERALD GREEN SUCCESS VIEW) */}
+        {/* DONE */}
         {step === 'done' && (
-          <div className="flex flex-col items-center gap-4 py-8 text-center max-w-md mx-auto">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
-              <CheckCircle2 className="h-7 w-7 text-emerald-600 dark:text-emerald-400" />
+          <div className="flex flex-col items-center gap-3 py-6 sm:py-8 text-center max-w-md mx-auto px-2">
+            <div className="flex h-12 w-12 sm:h-14 sm:w-14 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+              <CheckCircle2 className="h-6 w-6 sm:h-7 sm:w-7 text-emerald-600 dark:text-emerald-400" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-emerald-900 dark:text-emerald-100">Upload Completed Successfully!</h2>
-              <p className="mt-2 text-sm text-muted-foreground">{resultMessage}</p>
+              <h2 className="text-base sm:text-xl font-bold text-emerald-900 dark:text-emerald-100">Upload Completed!</h2>
+              <p className="mt-1 text-xs sm:text-sm text-muted-foreground">{resultMessage}</p>
             </div>
-            <Button onClick={startOver} className="mt-4 bg-emerald-600 hover:bg-emerald-700 text-white">
-              <FileSpreadsheet className="h-4 w-4 mr-2" />
+            <Button onClick={startOver} className="mt-2 bg-emerald-600 hover:bg-emerald-700 text-white touch-manipulation text-xs sm:text-sm">
+              <FileSpreadsheet className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5" />
               Import another file
             </Button>
           </div>
         )}
       </CardContent>
 
-      {/* Footer navigation */}
+      {/* Footer */}
       {(step === 'map' || step === 'review') && (
-        <div className="flex items-center justify-between gap-3 border-t bg-muted/30 px-5 py-4 sm:px-8">
-          <Button variant="ghost" onClick={goBack}>
-            <ArrowLeft className="h-4 w-4 mr-1" />
+        <div className="flex items-center justify-between gap-2 border-t bg-muted/30 px-3 sm:px-4 py-2.5">
+          <Button variant="ghost" onClick={goBack} className="touch-manipulation shrink-0 text-xs sm:text-sm h-8">
+            <ArrowLeft className="h-3.5 w-3.5 mr-1" />
             Back
           </Button>
 
           {step === 'map' ? (
-            <Button 
-              onClick={goNext} 
+            <Button
+              onClick={goNext}
               disabled={missingRequired.length > 0 || validationErrors.length > 0}
+              className="touch-manipulation text-xs sm:text-sm h-8"
             >
               Continue
-              <ArrowRight className="h-4 w-4 ml-1" />
+              <ArrowRight className="h-3.5 w-3.5 ml-1" />
             </Button>
           ) : (
-            <Button onClick={sendImport} disabled={sending} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+            <Button
+              onClick={sendImport}
+              disabled={sending}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white touch-manipulation text-xs sm:text-sm h-8"
+            >
               {sending ? (
                 <>
-                  <RefreshCw className="h-4 w-4 animate-spin mr-1" />
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin mr-1" />
                   Sending...
                 </>
               ) : (
                 <>
                   Send import
-                  <ArrowRight className="h-4 w-4 ml-1" />
+                  <ArrowRight className="h-3.5 w-3.5 ml-1" />
                 </>
               )}
             </Button>
@@ -901,44 +930,78 @@ export default function UploadExcel() {
   );
 }
 
-function MappingRow({
+/* ================================================================
+   Improved MappingCard
+   ================================================================ */
+function MappingCard({
   field,
   columns,
-  muted,
+  muted = false,
 }: {
   field: FieldConfig;
   columns: string[];
   muted?: boolean;
 }) {
   const isMapped = Boolean(field.value);
+
   return (
-    <div className={`flex items-center justify-between gap-4 rounded-xl border p-3 bg-background transition-all ${
-      !isMapped && field.required 
-        ? "border-amber-500/30 bg-amber-500/[0.01]" 
-        : isMapped 
-          ? "border-emerald-500/20 bg-emerald-500/[0.01]"
-          : "border-border"
-    }`}>
-      <div className="flex items-center gap-2.5 min-w-0">
+    <div
+      className={`
+        flex flex-col gap-1.5 rounded-lg border p-2.5 transition-all
+        ${!isMapped && field.required
+          ? "border-amber-400/50 bg-amber-500/[0.06]"
+          : isMapped
+            ? "border-emerald-500/40 bg-emerald-500/[0.06]"
+            : muted
+              ? "border-border/60 bg-muted/20"
+              : "border-border bg-background"
+        }
+      `}
+    >
+      {/* Label row */}
+      <div className="flex items-center gap-1.5 min-w-0">
         {isMapped ? (
-          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
         ) : (
-          <AlertCircle className={`h-4 w-4 shrink-0 ${field.required ? 'text-amber-500' : 'text-muted-foreground/40'}`} />
+          <AlertCircle
+            className={`h-3.5 w-3.5 shrink-0 ${
+              field.required ? "text-amber-500" : "text-muted-foreground/50"
+            }`}
+          />
         )}
-        <Label className={`text-sm font-medium truncate ${muted ? 'text-muted-foreground/80' : ''}`}>
-          {field.label}
+        <div className="min-w-0 flex-1">
+          <p
+            className={`text-[11px] font-medium truncate leading-none ${
+              muted && !isMapped ? "text-muted-foreground" : ""
+            }`}
+          >
+            {field.label}
+          </p>
           {field.required && !isMapped && (
-            <span className="block text-[10px] font-normal text-amber-600 dark:text-amber-400 mt-0.5">Required mapping</span>
+            <p className="text-[9px] text-amber-600 dark:text-amber-400 mt-0.5 leading-none">
+              Required
+            </p>
           )}
-        </Label>
+        </div>
       </div>
-      <Select value={field.value ?? '__none'} onValueChange={v => field.set(v === '__none' ? null : v)}>
-        <SelectTrigger className="h-9 w-[160px] text-sm shrink-0 bg-background shadow-xs">
-          <SelectValue placeholder="Select column..." />
+
+      {/* Select */}
+      <Select
+        value={field.value ?? "__none"}
+        onValueChange={(v) => field.set(v === "__none" ? null : v)}
+      >
+        <SelectTrigger className="h-7 w-full text-[11px] bg-background/80 shadow-none border-border/70">
+          <SelectValue placeholder="Select column…" />
         </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__none">{field.required ? '(Not mapped)' : '(Skip)'}</SelectItem>
-          {columns.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+        <SelectContent className="max-w-[240px]">
+          <SelectItem value="__none" className="text-xs text-muted-foreground">
+            {field.required ? "— Not mapped" : "— Skip"}
+          </SelectItem>
+          {columns.map((c) => (
+            <SelectItem key={c} value={c} className="text-xs truncate" title={c}>
+              {c}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
     </div>
@@ -947,7 +1010,7 @@ function MappingRow({
 
 function StatBox({ label, value, truncate }: { label: string; value: string; truncate?: boolean }) {
   return (
-    <div className="rounded-xl border bg-muted/20 p-3">
+    <div className="rounded-xl border bg-muted/20 p-3 min-w-0">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className={`mt-0.5 text-sm font-medium ${truncate ? 'truncate' : ''}`} title={truncate ? value : undefined}>
         {value}
