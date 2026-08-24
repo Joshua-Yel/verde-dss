@@ -64,6 +64,12 @@ false, say VERDE does not track that at all; if it is true but the business data
 say the data is not available for this business yet. If something is asked that the analytics context
 doesn't cover, say so plainly rather than guessing.
 
+For time-of-day / peak-hour / shift questions: if trackedCapabilities.tracksTimeOfDay is true (or
+staffing.hasTimeOfDay is true), use staffing.peakHours, staffing.amSessions, staffing.pmSessions,
+staffing.earliestHour, and staffing.latestHour from the context. If tracksTimeOfDay is false, say
+time-of-day is not available for this business yet and fall back to weekday patterns only — do not
+invent hourly schedules.
+
 When a forecast horizon beyond the latest historical period is requested, explain that the projection
 is a recursive multi-step forecast from the latest history and state the horizon length.
 

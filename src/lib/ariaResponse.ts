@@ -12,6 +12,13 @@ export type AriaContextPayload = {
   staffing?: {
     dailyBreakdown?: Array<{ day: string; forecastedSessions: number; demandLevel: string }>;
     hourlyHeatmap?: number[][];
+    peakHours?: Array<{ hour: number; label: string; sessions: number; share: number }>;
+    amSessions?: number;
+    pmSessions?: number;
+    earliestHour?: number | null;
+    latestHour?: number | null;
+    hasTimeOfDay?: boolean;
+    timeOfDayFillRate?: number;
   };
   averageMape?: number | null;
   forecastModelFit?: string | null;
@@ -648,12 +655,34 @@ function buildRevenueReply(payload: AriaContextPayload, userText: string, trendF
   );
 }
 
+function formatHourLabel(hour: number | null | undefined): string {
+  if (hour === null || hour === undefined || !Number.isFinite(hour)) return 'n/a';
+  const h = Math.max(0, Math.min(23, Math.floor(hour)));
+  const period = h >= 12 ? 'PM' : 'AM';
+  const display = h % 12 === 0 ? 12 : h % 12;
+  return `${display}:00 ${period}`;
+}
+
 function buildStaffingReply(payload: AriaContextPayload, userText: string): string {
   const { latestHistoricalLabel, forecastLabel, horizonText } =
     buildForecastPeriodContext(payload, userText);
   const { weekday, staffing } = getStaffingSignals(payload);
   const { services } = getServiceContext(payload);
   const { projectedRevenue, trend } = getRevenueContext(payload);
+
+  const staffMeta = payload.staffing;
+  const hasTimeOfDay = Boolean(staffMeta?.hasTimeOfDay);
+  const peakHours = Array.isArray(staffMeta?.peakHours) ? staffMeta!.peakHours! : [];
+  const amSessions = Number(staffMeta?.amSessions ?? 0);
+  const pmSessions = Number(staffMeta?.pmSessions ?? 0);
+  const earliestHour = staffMeta?.earliestHour ?? null;
+  const latestHour = staffMeta?.latestHour ?? null;
+  const fillRate = Number(staffMeta?.timeOfDayFillRate ?? 0);
+
+  const asksAboutHours =
+    /time of day|peak hour|what time|shift|start|end|open|close|morning|afternoon|evening|am\b|pm\b|hour/i.test(
+      userText,
+    );
 
   // Prefer explicit staffing breakdown when present
   if (staffing.length > 0) {
@@ -664,11 +693,41 @@ function buildStaffingReply(payload: AriaContextPayload, userText: string): stri
       (d) =>
         `• **${d.day}**: ~${d.forecastedSessions} forecasted sessions (${d.demandLevel || 'n/a'} demand)`,
     );
+
+    let timeBlock = '';
+    if (hasTimeOfDay && peakHours.length > 0) {
+      const peakLines = peakHours
+        .slice(0, 3)
+        .map((p) => `• **${p.label}** (~${p.sessions} sessions, ${p.share}% of timed volume)`)
+        .join('\n');
+      const amPm =
+        amSessions + pmSessions > 0
+          ? ` AM volume ~${amSessions} sessions vs PM ~${pmSessions}.`
+          : '';
+      const shiftHint =
+        earliestHour !== null && latestHour !== null
+          ? ` Observed activity roughly spans **${formatHourLabel(earliestHour)}** to **${formatHourLabel(latestHour)}**.` +
+            ` A practical shift window is to open near the earliest demand and keep full coverage through the peak hours listed above.`
+          : '';
+      timeBlock =
+        `\n\n**Time-of-day pattern** (${Math.round(fillRate * 100)}% of operations have a usable time):\n` +
+        `${peakLines}.${amPm}${shiftHint}`;
+    } else if (asksAboutHours) {
+      timeBlock =
+        `\n\nTime-of-day detail is not available yet for this business (fill rate ${Math.round(fillRate * 100)}%). ` +
+        `Re-import Operations with the **Time of Day** column mapped so peak-hour and shift guidance can be computed.`;
+    }
+
     return (
       `Staffing outlook for **${forecastLabel}** (${horizonText}; latest history: **${latestHistoricalLabel}**):\n` +
-      `${lines.join('\n')}\n\n` +
-      `Recommendation: add coverage on the highest-session days first. ` +
-      `These figures come from the staffing context derived from operational demand.`
+      `${lines.join('\n')}` +
+      timeBlock +
+      `\n\nRecommendation: add coverage on the highest-session days first` +
+      (hasTimeOfDay && peakHours[0]
+        ? `, and staff the peak hour around **${peakHours[0].label}** more heavily.`
+        : '.') +
+      ` These figures come from operational demand` +
+      (hasTimeOfDay ? ' including recorded service times.' : '.')
     );
   }
 

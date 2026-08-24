@@ -8,6 +8,8 @@ import {
   getExpenseCategoryBreakdown,
   getInventoryConsumptionSignal,
   getInventoryAnalytics as getInventoryAnalyticsFromSupabase,
+  getHourPatterns,
+  getTimeOfDayAvailability,
 } from './supabase'
 
 export type DashboardRangeOption = '1y' | '2y' | 'all';
@@ -165,6 +167,24 @@ export async function getWeekdayPatternsData(options?: DashboardDataOptions) {
 export async function getServiceByWeekdayData(options?: DashboardDataOptions) {
   const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
   return getServiceByWeekday(userId ?? '', { businessId: options?.businessId, lookbackMonths: options?.lookbackMonths })
+}
+
+export async function getHourPatternsData(options?: DashboardDataOptions) {
+  const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
+  return getHourPatterns(userId ?? '', {
+    businessId: options?.businessId,
+    lookbackMonths: options?.lookbackMonths,
+    displayRange: options?.displayRange,
+  })
+}
+
+export async function getTimeOfDayAvailabilityData(options?: DashboardDataOptions) {
+  const userId = options?.userId ?? (options?.businessId ? null : await getCurrentUserId())
+  return getTimeOfDayAvailability(userId ?? '', {
+    businessId: options?.businessId,
+    lookbackMonths: options?.lookbackMonths,
+    displayRange: options?.displayRange,
+  })
 }
 
 export async function getExpenseCategoryBreakdownData(options?: DashboardDataOptions) {

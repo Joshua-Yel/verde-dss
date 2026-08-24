@@ -48,6 +48,8 @@ interface OperationRow {
   quantity: number | null
   revenue: number | null
   service_id: number | null
+  time_of_day?: string | null
+  hour?: number | null
 }
 
 function normalizeString(value: unknown): string | null {
@@ -281,7 +283,7 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
 
     let operationQueryBuilder = client
       .from('daily_operations')
-      .select('date,quantity,revenue,service_id')
+      .select('date,quantity,revenue,service_id,time_of_day,hour')
       .eq('business_id', businessId)
 
     if (cutoffDateISO) {
@@ -663,14 +665,77 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
     expenseCategorySeries,
     forecastMethodUsed: 'WMA',
     confidenceBand,
-    dataAvailability: {
-      timeOfDayFillRate: 0,
-      inventoryHasReorderPoints: inventoryItems.some((item) => item.reorderPoint !== null),
-      inventoryHasUnitCost: inventoryItems.some((item) => item.unitCost !== null),
-      expenseDataAvailable: hasExpenseData,
-      dateRangeMonths: Math.max(1, Math.round(labels.length / 4)),
-      expenseCategoriesTracked: expenseBreakdown.map((item) => item.category),
-    },
+    // Real time-of-day coverage + hour aggregates from stored hour values
+    ...(() => {
+      const source = visibleOperations as OperationRow[]
+      const withHour = source.filter(
+        (op) => typeof op.hour === 'number' && Number.isFinite(op.hour) && op.hour >= 0 && op.hour <= 23,
+      )
+      const fillRate = source.length > 0 ? Math.round((withHour.length / source.length) * 1000) / 1000 : 0
+
+      // Sessions (quantity) by hour 0–23
+      const hourBuckets = Array.from({ length: 24 }, () => 0)
+      // Weekday (0=Sun..6=Sat) × hour sessions for heatmap
+      const heatmap = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0))
+      let amSessions = 0
+      let pmSessions = 0
+
+      for (const op of withHour) {
+        const h = op.hour as number
+        const qty = Number(op.quantity ?? 1) || 1
+        hourBuckets[h] += qty
+        if (h < 12) amSessions += qty
+        else pmSessions += qty
+        if (op.date) {
+          const dow = new Date(op.date + 'T12:00:00').getDay()
+          if (dow >= 0 && dow <= 6) heatmap[dow][h] += qty
+        }
+      }
+
+      const totalHourSessions = hourBuckets.reduce((s, v) => s + v, 0)
+      const peakHours = hourBuckets
+        .map((sessions, hour) => ({ hour, sessions }))
+        .filter((x) => x.sessions > 0)
+        .sort((a, b) => b.sessions - a.sessions)
+        .slice(0, 5)
+        .map((x) => ({
+          hour: x.hour,
+          label: `${String(x.hour).padStart(2, '0')}:00`,
+          sessions: x.sessions,
+          share: totalHourSessions > 0 ? Math.round((x.sessions / totalHourSessions) * 1000) / 10 : 0,
+        }))
+
+      const earliestHour = peakHours.length
+        ? hourBuckets.findIndex((v) => v > 0)
+        : null
+      const latestHour = peakHours.length
+        ? 23 - [...hourBuckets].reverse().findIndex((v) => v > 0)
+        : null
+
+      return {
+        hourPatterns: {
+          byHour: hourBuckets.map((sessions, hour) => ({
+            hour,
+            label: `${String(hour).padStart(2, '0')}:00`,
+            sessions,
+          })),
+          peakHours,
+          amSessions,
+          pmSessions,
+          earliestHour: earliestHour !== undefined && earliestHour >= 0 ? earliestHour : null,
+          latestHour: latestHour !== undefined && latestHour >= 0 && latestHour <= 23 ? latestHour : null,
+          heatmap, // [weekday 0-6][hour 0-23]
+        },
+        dataAvailability: {
+          timeOfDayFillRate: fillRate,
+          inventoryHasReorderPoints: inventoryItems.some((item) => item.reorderPoint !== null),
+          inventoryHasUnitCost: inventoryItems.some((item) => item.unitCost !== null),
+          expenseDataAvailable: hasExpenseData,
+          dateRangeMonths: Math.max(1, Math.round(labels.length / 4)),
+          expenseCategoriesTracked: expenseBreakdown.map((item) => item.category),
+        },
+      }
+    })(),
   }
 }
 
@@ -764,6 +829,26 @@ export async function getServiceByWeekday(userId: string, options?: DashboardDat
 export async function getExpenseCategoryBreakdown(userId: string, options?: DashboardDataOptions) {
   const data = await getSupabaseDashboardData(userId, options)
   return data.expenseBreakdown ?? []
+}
+
+export async function getHourPatterns(userId: string, options?: DashboardDataOptions) {
+  const data = await getSupabaseDashboardData(userId, options)
+  return (
+    (data as { hourPatterns?: unknown }).hourPatterns ?? {
+      byHour: [],
+      peakHours: [],
+      amSessions: 0,
+      pmSessions: 0,
+      earliestHour: null,
+      latestHour: null,
+      heatmap: [],
+    }
+  )
+}
+
+export async function getTimeOfDayAvailability(userId: string, options?: DashboardDataOptions) {
+  const data = await getSupabaseDashboardData(userId, options)
+  return data.dataAvailability ?? { timeOfDayFillRate: 0 }
 }
 
 function parseMonthKey(month: unknown) {

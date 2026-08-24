@@ -10,19 +10,41 @@ import {
   getInventoryAnalytics,
   getWeekdayPatternsData,
   getServiceByWeekdayData,
+  getHourPatternsData,
+  getTimeOfDayAvailabilityData,
 } from '@/lib/data';
 
+type WeekdayRow = { day?: string; sessions?: number; revenue?: number };
+
+type HourPatterns = {
+  byHour?: Array<{ hour: number; label: string; sessions: number }>;
+  peakHours?: Array<{ hour: number; label: string; sessions: number; share: number }>;
+  amSessions?: number;
+  pmSessions?: number;
+  earliestHour?: number | null;
+  latestHour?: number | null;
+  heatmap?: number[][];
+};
+
 /**
- * Derive staffing signals from weekday session / revenue patterns.
- * Replaces the previous empty stub so ARIA can answer staffing questions.
+ * Derive staffing signals from weekday session patterns + real hour-of-day data.
  */
 function buildStaffingContext(
-  weekdayPatterns: Array<{ day?: string; sessions?: number; revenue?: number }>,
+  weekdayPatterns: WeekdayRow[],
+  hourPatterns: HourPatterns | null,
+  timeOfDayFillRate: number,
 ) {
   if (!Array.isArray(weekdayPatterns) || weekdayPatterns.length === 0) {
     return {
       dailyBreakdown: [] as Array<{ day: string; forecastedSessions: number; demandLevel: string }>,
       hourlyHeatmap: [] as number[][],
+      peakHours: [] as Array<{ hour: number; label: string; sessions: number; share: number }>,
+      amSessions: 0,
+      pmSessions: 0,
+      earliestHour: null as number | null,
+      latestHour: null as number | null,
+      hasTimeOfDay: false,
+      timeOfDayFillRate: 0,
     };
   }
 
@@ -44,9 +66,31 @@ function buildStaffingContext(
     };
   });
 
+  const hasTimeOfDay = timeOfDayFillRate >= 0.05 && Array.isArray(hourPatterns?.peakHours) && (hourPatterns?.peakHours?.length ?? 0) > 0;
+
+  // Prefer real weekday×hour heatmap when available; otherwise empty
+  let hourlyHeatmap: number[][] = [];
+  if (hasTimeOfDay && Array.isArray(hourPatterns?.heatmap) && hourPatterns!.heatmap!.length === 7) {
+    // Compress 24 hours → 12 buckets (2-hour blocks) to keep payload small
+    hourlyHeatmap = hourPatterns!.heatmap!.map((dayRow) => {
+      const compressed: number[] = [];
+      for (let i = 0; i < 24; i += 2) {
+        compressed.push((dayRow[i] ?? 0) + (dayRow[i + 1] ?? 0));
+      }
+      return compressed;
+    });
+  }
+
   return {
     dailyBreakdown,
-    hourlyHeatmap: [] as number[][],
+    hourlyHeatmap,
+    peakHours: hasTimeOfDay ? (hourPatterns?.peakHours ?? []).slice(0, 5) : [],
+    amSessions: hasTimeOfDay ? Number(hourPatterns?.amSessions ?? 0) : 0,
+    pmSessions: hasTimeOfDay ? Number(hourPatterns?.pmSessions ?? 0) : 0,
+    earliestHour: hasTimeOfDay ? (hourPatterns?.earliestHour ?? null) : null,
+    latestHour: hasTimeOfDay ? (hourPatterns?.latestHour ?? null) : null,
+    hasTimeOfDay,
+    timeOfDayFillRate,
   };
 }
 
@@ -59,9 +103,15 @@ type MissingDataWarningInput = {
   inventoryAnalytics: {
     hasInventoryHistory?: boolean;
   };
+  timeOfDayFillRate: number;
 };
 
-const buildMissingDataWarnings = ({ financialSeries, inventoryItems, inventoryAnalytics }: MissingDataWarningInput) => {
+const buildMissingDataWarnings = ({
+  financialSeries,
+  inventoryItems,
+  inventoryAnalytics,
+  timeOfDayFillRate,
+}: MissingDataWarningInput) => {
   const warnings: string[] = [];
   if (!financialSeries.dataAvailability?.expenseDataAvailable) {
     warnings.push('Expense records are unavailable; profit or net income calculations are not supported.');
@@ -74,6 +124,11 @@ const buildMissingDataWarnings = ({ financialSeries, inventoryItems, inventoryAn
   }
   if (!financialSeries.periodLabels || financialSeries.periodLabels.length === 0) {
     warnings.push('Revenue history is insufficient to build a reliable forecast.');
+  }
+  if (timeOfDayFillRate < 0.05) {
+    warnings.push(
+      'Time-of-day data is missing or sparse; peak-hour and shift-timing answers will use weekday patterns only.',
+    );
   }
   return warnings;
 };
@@ -95,6 +150,8 @@ const buildAriaContextSummary = unstable_cache(
       inventoryAnalytics,
       weekdayPatterns,
       serviceByWeekday,
+      hourPatterns,
+      timeAvailability,
     ] = await Promise.all([
       getKPIsOverview({ businessId, displayRange: 'all' }),
       getRevenueSeries({ businessId, displayRange: 'all' }),
@@ -106,9 +163,19 @@ const buildAriaContextSummary = unstable_cache(
       getInventoryAnalytics({ businessId, displayRange: 'all' }),
       getWeekdayPatternsData({ businessId, displayRange: 'all' }),
       getServiceByWeekdayData({ businessId, displayRange: 'all' }),
+      getHourPatternsData({ businessId, displayRange: 'all' }),
+      getTimeOfDayAvailabilityData({ businessId, displayRange: 'all' }),
     ]);
 
-    const staffingContext = buildStaffingContext(weekdayPatterns ?? []);
+    const timeOfDayFillRate = Number(
+      (timeAvailability as { timeOfDayFillRate?: number })?.timeOfDayFillRate ?? 0,
+    );
+
+    const staffingContext = buildStaffingContext(
+      weekdayPatterns ?? [],
+      hourPatterns as HourPatterns,
+      timeOfDayFillRate,
+    );
 
     const periodLabels =
       (financialSeries.periodLabels ?? []).length > 0
@@ -148,19 +215,19 @@ const buildAriaContextSummary = unstable_cache(
       })
       .slice(0, 10);
 
-    // Honest capability flags — extend when real tracking is wired
     const trackedCapabilities = {
       tracksCustomers: false,
       tracksStaff: staffingContext.dailyBreakdown.length > 0,
       tracksNoShows: false,
       tracksBookingLeadTime: false,
-      tracksTimeOfDay: false,
+      tracksTimeOfDay: staffingContext.hasTimeOfDay,
     };
 
     const missingDataWarnings = buildMissingDataWarnings({
       financialSeries,
       inventoryItems,
       inventoryAnalytics,
+      timeOfDayFillRate,
     });
 
     const analyticsContext = {
@@ -186,6 +253,15 @@ const buildAriaContextSummary = unstable_cache(
         topServices,
         forecastMethodUsed: financialSeries.forecastMethodUsed ?? 'WMA',
       },
+      staffingSummary: {
+        hasTimeOfDay: staffingContext.hasTimeOfDay,
+        timeOfDayFillRate: staffingContext.timeOfDayFillRate,
+        peakHours: staffingContext.peakHours,
+        amSessions: staffingContext.amSessions,
+        pmSessions: staffingContext.pmSessions,
+        earliestHour: staffingContext.earliestHour,
+        latestHour: staffingContext.latestHour,
+      },
       availableMetrics: {
         revenue: revenueSeries.length > 0,
         expenses: Boolean(financialSeries.dataAvailability?.expenseDataAvailable),
@@ -194,6 +270,7 @@ const buildAriaContextSummary = unstable_cache(
           (item: { reorderPoint?: number | null }) => item.reorderPoint !== null,
         ),
         staffing: staffingContext.dailyBreakdown.length > 0,
+        timeOfDay: staffingContext.hasTimeOfDay,
       },
       missingDataWarnings,
       trackedCapabilities,
@@ -211,7 +288,6 @@ const buildAriaContextSummary = unstable_cache(
       monthlyRevenue,
       topServices,
       criticalRestock,
-      // Keep enough history for multi-step inventory WMA in ARIA
       fullInventory: inventoryItems.slice(0, 50).map((item: Record<string, unknown>) => ({
         ...item,
         history: Array.isArray((item as { history?: unknown }).history)
@@ -222,20 +298,28 @@ const buildAriaContextSummary = unstable_cache(
       recentOperations: dailyLog.slice(0, 15),
       staffing: {
         dailyBreakdown: staffingContext.dailyBreakdown.slice(0, 7),
-        hourlyHeatmap: staffingContext.hourlyHeatmap.slice(0, 6).map((row) => row.slice(0, 12)),
+        hourlyHeatmap: staffingContext.hourlyHeatmap.slice(0, 7),
+        peakHours: staffingContext.peakHours,
+        amSessions: staffingContext.amSessions,
+        pmSessions: staffingContext.pmSessions,
+        earliestHour: staffingContext.earliestHour,
+        latestHour: staffingContext.latestHour,
+        hasTimeOfDay: staffingContext.hasTimeOfDay,
+        timeOfDayFillRate: staffingContext.timeOfDayFillRate,
       },
       weekdayPatterns: (weekdayPatterns ?? []).slice(0, 7),
       serviceByWeekday: (serviceByWeekday ?? []).slice(0, 7),
       trackedCapabilities,
       dataAvailability: {
         ...(financialSeries.dataAvailability ?? {}),
+        timeOfDayFillRate: staffingContext.timeOfDayFillRate,
         trackedCapabilities,
       },
       analyticsContext,
       missingDataWarnings,
     };
   },
-  ['aria-context-summary-v6-staffing-horizon'],
+  ['aria-context-summary-v7-timeofday'],
   { revalidate: 15, tags: ['aria-context'] },
 );
 
