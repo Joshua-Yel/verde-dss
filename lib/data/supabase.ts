@@ -715,12 +715,14 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
           share: totalHourSessions > 0 ? Math.round((x.sessions / totalHourSessions) * 1000) / 10 : 0,
         }))
 
-      const earliestHour = peakHours.length
-        ? hourBuckets.findIndex((v) => v > 0)
-        : null
-      const latestHour = peakHours.length
-        ? 23 - [...hourBuckets].reverse().findIndex((v) => v > 0)
-        : null
+      let earliestHour: number | null = null
+      let latestHour: number | null = null
+      if (peakHours.length > 0) {
+        const firstIdx = hourBuckets.findIndex((v) => v > 0)
+        const lastFromEnd = [...hourBuckets].reverse().findIndex((v) => v > 0)
+        if (firstIdx >= 0) earliestHour = firstIdx
+        if (lastFromEnd >= 0) latestHour = 23 - lastFromEnd
+      }
 
       return {
         hourPatterns: {
@@ -732,8 +734,8 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
           peakHours,
           amSessions,
           pmSessions,
-          earliestHour: earliestHour !== undefined && earliestHour >= 0 ? earliestHour : null,
-          latestHour: latestHour !== undefined && latestHour >= 0 && latestHour <= 23 ? latestHour : null,
+          earliestHour,
+          latestHour,
           heatmap, // [weekday 0-6][hour 0-23]
         },
         dataAvailability: {
