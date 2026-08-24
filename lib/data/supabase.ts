@@ -237,12 +237,22 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
       expenseBreakdown: [],
       forecastMethodUsed: 'WMA',
       confidenceBand: null,
+      hourPatterns: {
+        byHour: [] as Array<{ hour: number; label: string; sessions: number }>,
+        peakHours: [] as Array<{ hour: number; label: string; sessions: number; share: number }>,
+        amSessions: 0,
+        pmSessions: 0,
+        earliestHour: null as number | null,
+        latestHour: null as number | null,
+        heatmap: [] as number[][],
+      },
       dataAvailability: {
         timeOfDayFillRate: 0,
         inventoryHasReorderPoints: false,
         inventoryHasUnitCost: false,
+        expenseDataAvailable: false,
         dateRangeMonths: 0,
-        expenseCategoriesTracked: [],
+        expenseCategoriesTracked: [] as string[],
       },
     }
   }
