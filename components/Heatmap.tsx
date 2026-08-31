@@ -16,38 +16,44 @@ export default function Heatmap({
   const min = Math.min(...flat, 0)
   const range = Math.max(1, max - min)
 
-  // Diverging scale: cool (low) → warm (high). Text stays readable.
-// VERDE heatmap: light sage → brand accent → deep forest
-function colorFor(v: number) {
-  const t = Math.max(0, Math.min(1, (v - min) / range))
+  // Monochrome heatmap: red (low) → orange → yellow → green (high)
+  function colorFor(v: number) {
+    const t = Math.max(0, Math.min(1, (v - min) / range))
 
-  // Light: #E8EFE8
-  // Mid:   #6B7E6B
-  // High:  #4A5F4A
+    // Red:    #FF4444 (255, 68, 68)
+    // Orange: #FF9944 (255, 153, 68)
+    // Yellow: #FFDD44 (255, 221, 68)
+    // Green:  #44CC44 (68, 204, 68)
 
-  if (t < 0.5) {
-    const p = t * 2
-
-    const r = Math.round(232 - p * (232 - 107))
-    const g = Math.round(239 - p * (239 - 126))
-    const b = Math.round(232 - p * (232 - 107))
-
-    return `rgb(${r}, ${g}, ${b})`
+    if (t < 0.33) {
+      // Red to Orange
+      const p = t / 0.33
+      const r = 255
+      const g = Math.round(68 + p * (153 - 68))
+      const b = 68
+      return `rgb(${r}, ${g}, ${b})`
+    } else if (t < 0.67) {
+      // Orange to Yellow
+      const p = (t - 0.33) / 0.34
+      const r = 255
+      const g = Math.round(153 + p * (221 - 153))
+      const b = 68
+      return `rgb(${r}, ${g}, ${b})`
+    } else {
+      // Yellow to Green
+      const p = (t - 0.67) / 0.33
+      const r = Math.round(255 - p * (255 - 68))
+      const g = Math.round(221 + p * (204 - 221))
+      const b = 68
+      return `rgb(${r}, ${g}, ${b})`
+    }
   }
 
-  const p = (t - 0.5) * 2
-
-  const r = Math.round(107 - p * (107 - 74))
-  const g = Math.round(126 - p * (126 - 95))
-  const b = Math.round(107 - p * (107 - 74))
-
-  return `rgb(${r}, ${g}, ${b})`
-}
-
-function textColor(v: number) {
-  const t = (v - min) / range
-  return t > 0.6 ? "#F8F7F4" : "#1F1F1F"
-}
+  function textColor(v: number) {
+    const t = (v - min) / range
+    // Use light text for red/orange, dark text for yellow/green
+    return t > 0.5 ? "#1F1F1F" : "#F8F7F4"
+  }
 
   const cols = grid[0]?.length ?? 0
   const hasRowLabels = Array.isArray(rowLabels) && rowLabels.length === grid.length

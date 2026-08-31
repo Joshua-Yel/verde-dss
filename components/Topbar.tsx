@@ -23,7 +23,7 @@ export default function Topbar({
 
     async function loadDateRange() {
       try {
-        const response = await fetch('/api/dashboard/date-range', { cache: 'no-store' })
+        const response = await fetch('/api/dashboard/date-range')
         if (!response.ok) return
         const payload = await response.json()
         if (isMounted) {

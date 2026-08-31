@@ -22,10 +22,21 @@ type OverviewRange = '12m' | '24m' | 'all';
 
 type DashboardDisplayRange = '1y' | '2y' | 'all';
 
-function resolveOverviewRange(searchParams: { range?: string } | undefined): OverviewRange {
+type RangeCoverage = {
+  hasAnyData: boolean;
+  has12mData: boolean;
+  has24mData: boolean;
+};
+
+function resolveOverviewRange(searchParams: { range?: string } | undefined, coverage: RangeCoverage): OverviewRange {
   const rawRange = searchParams?.range;
-  if (rawRange === '24m') return '24m';
-  if (rawRange === 'all') return 'all';
+
+  if (rawRange === '24m' && coverage.has24mData) return '24m';
+  if (rawRange === 'all' && coverage.hasAnyData) return 'all';
+  if (rawRange === '12m' && coverage.has12mData) return '12m';
+
+  if (coverage.has12mData) return '12m';
+  if (coverage.hasAnyData) return 'all';
   return '12m';
 }
 
@@ -41,7 +52,16 @@ export default async function OverviewPage({ searchParams }: PageProps) {
       ? await searchParams
       : searchParams || {};
 
-  const range = resolveOverviewRange(searchParamsObject);
+  const dataCoverage = await getFinancialSummary({ displayRange: 'all' });
+  const hasAnyData = (dataCoverage.periodLabels?.length ?? 0) > 0;
+  const has12mData = (dataCoverage.periodLabels?.length ?? 0) >= 12;
+  const has24mData = (dataCoverage.periodLabels?.length ?? 0) >= 24;
+
+  const range = resolveOverviewRange(searchParamsObject, {
+    hasAnyData,
+    has12mData,
+    has24mData,
+  });
 
   return (
     <div className="space-y-6 mx-auto p-4 md:p-6 text-foreground bg-background transition-colors duration-200">
@@ -59,9 +79,9 @@ export default async function OverviewPage({ searchParams }: PageProps) {
               <OverviewSubheading range={range} />
             </Suspense>
             <div className="inline-flex rounded-lg border border-border bg-card p-1 shadow-sm">
-              <RangePill href="/overview?range=12m" active={range === '12m'}>Last year</RangePill>
-              <RangePill href="/overview?range=24m" active={range === '24m'}>Last 2 years</RangePill>
-              <RangePill href="/overview?range=all" active={range === 'all'}>All records</RangePill>
+              <RangePill href={has12mData ? '/overview?range=12m' : undefined} active={range === '12m'} disabled={!has12mData}>Last year</RangePill>
+              <RangePill href={has24mData ? '/overview?range=24m' : undefined} active={range === '24m'} disabled={!has24mData}>Last 2 years</RangePill>
+              <RangePill href={hasAnyData ? '/overview?range=all' : undefined} active={range === 'all'} disabled={!hasAnyData}>All records</RangePill>
             </div>
           </div>
         </div>
@@ -95,7 +115,18 @@ export default async function OverviewPage({ searchParams }: PageProps) {
   );
 }
 
-function RangePill({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
+function RangePill({ href, active, disabled = false, children }: { href?: string; active: boolean; disabled?: boolean; children: React.ReactNode }) {
+  if (disabled) {
+    return (
+      <span
+        aria-disabled="true"
+        className="rounded-md px-3 py-1.5 text-xs font-medium text-muted-foreground/60 cursor-not-allowed opacity-60"
+      >
+        {children}
+      </span>
+    );
+  }
+
   return (
     <a
       href={href}

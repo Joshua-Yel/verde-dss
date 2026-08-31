@@ -4,6 +4,7 @@ import supabaseServer from '../../../src/lib/supabaseServer'
 import { createSupabaseRouteClient } from '../../../src/lib/supabaseRoute'
 import { resolveBusinessIdForUser } from '../../../src/lib/businessAccess'
 import { insertWithBusinessIdFallback } from '../../../src/lib/supabaseCompat'
+import { normalizeDate } from '../../../src/lib/dateUtils'
 
 const revalidateDashboardTag = revalidateTag as unknown as (tag: string) => void
 
@@ -53,27 +54,6 @@ function normalizeNumber(value: unknown): number | null {
   if (!normalized) return null
   const parsed = Number(normalized)
   return Number.isFinite(parsed) ? parsed : null
-}
-
-function normalizeDate(value: unknown): string | null {
-  if (value === undefined || value === null || value === '') return null
-
-  if (typeof value === 'number' || (!isNaN(Number(value)) && String(value).trim() !== '')) {
-    const serial = Number(value)
-    if (Number.isFinite(serial)) {
-      // Excel serial date (whole number). Fractional part is time-of-day — handled separately.
-      if (serial >= 1) {
-        const offset = serial > 59 ? serial - 1 : serial
-        const ms = (Math.floor(offset) - 25569) * 86400000
-        const date = new Date(ms)
-        if (!Number.isNaN(date.getTime())) return date.toISOString().slice(0, 10)
-      }
-    }
-  }
-
-  const parsed = new Date(String(value))
-  if (Number.isNaN(parsed.getTime())) return null
-  return parsed.toISOString().slice(0, 10)
 }
 
 /**
@@ -402,6 +382,15 @@ export async function POST(request: Request) {
     }
 
     const mapped: MappedRowWithIndex[] = (rows as ImportedRow[]).map((row, index) => {
+  const normalizedDate = normalizeDate(row.date)
+
+  console.log('DATE DEBUG:', {
+    original: row.date,
+    originalType: typeof row.date,
+    isDateObject: row.date instanceof Date,
+    normalized: normalizedDate,
+  })
+
       // Prefer explicit time_of_day field from the uploader; fall back to common header aliases
       const timeSource =
         row.time_of_day ??

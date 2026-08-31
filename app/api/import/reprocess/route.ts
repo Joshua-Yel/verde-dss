@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { revalidateTag } from 'next/cache'
 import supabaseServer from '../../../../src/lib/supabaseServer'
+import { normalizeDate } from '../../../../src/lib/dateUtils'
 
 const revalidateDashboardTag = revalidateTag as unknown as (tag: string) => void
 
@@ -66,11 +67,7 @@ export async function POST(request: Request) {
 
       const serviceName = sKey ? (r[sKey] || '').toString().trim() : ''
       const rawDate = dKey ? r[dKey] : null
-      let dateStr: string | null = null
-      if (rawDate) {
-        const d = new Date(rawDate)
-        if (!isNaN(d.getTime())) dateStr = d.toISOString().slice(0,10)
-      }
+      const dateStr = normalizeDate(rawDate)
 
       const quantity = qKey ? (parseInt(r[qKey]) || null) : null
       const revenue = revKey ? (parseFloat(r[revKey]) || null) : null

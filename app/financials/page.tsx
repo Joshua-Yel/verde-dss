@@ -69,6 +69,11 @@ async function FinancialsContent() {
     ? Math.round((netIncomeForecast! / revenueForecast) * 1000) / 10
     : null;
   const latestLabel = (financials.periodLabels ?? []).slice(-1)[0] ?? 'latest period';
+  const totalRevenue = revenueSeries.reduce((sum, value) => sum + value, 0);
+  const totalExpenses = expenseSeries.reduce((sum, value) => sum + value, 0);
+  const totalNetIncome = netIncomeSeries.reduce((sum, value) => sum + value, 0);
+  const activeDays = Math.max(1, revenueSeries.length * 30);
+  const avgDailyRevenue = totalRevenue / activeDays;
   const forecastRevenueLabel = revenueForecast !== null ? formatCurrency(revenueForecast) : 'Insufficient revenue history';
   const forecastExpensesLabel = expenseForecast !== null ? formatCurrency(expenseForecast ?? 0) : 'Financial calculation unavailable because cost data is missing.';
   const forecastNetIncomeLabel = netIncomeForecast !== null ? formatCurrency(netIncomeForecast ?? 0) : 'Financial calculation unavailable because cost data is missing.';
@@ -94,7 +99,95 @@ async function FinancialsContent() {
 
   return (
     <>
-      <div className="xl:col-span-2 grid grid-cols-2 md:grid-cols-4 gap-3 w-full">
+      {/* KPI CARDS */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 w-full">
+        {[
+          {
+            label: "Avg Daily Revenue",
+            value: `₱${Math.round(avgDailyRevenue).toLocaleString()}`,
+            desc: "Rolling utilization yield",
+            icon: (
+              <>
+                <line x1="12" x2="12" y1="2" y2="22" />
+                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+              </>
+            ),
+          },
+          {
+            label: "Total Revenue",
+            value: `₱${Math.round(totalRevenue).toLocaleString()}`,
+            desc: "Cumulative gross earnings",
+            icon: (
+              <>
+                <rect width="20" height="12" x="2" y="6" rx="2" />
+                <circle cx="12" cy="12" r="2" />
+                <path d="M6 12h.01M18 12h.01" />
+              </>
+            ),
+          },
+          {
+            label: "Total Net Income",
+            value: `₱${Math.round(totalNetIncome).toLocaleString()}`,
+            desc: "Net income after costs",
+            icon: (
+              <>
+                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                <circle cx="12" cy="12" r="10" className="opacity-20" />
+              </>
+            ),
+          },
+          {
+            label: "Total Expenses",
+            value: `₱${Math.round(totalExpenses).toLocaleString()}`,
+            desc: "Cumulative operating costs",
+            icon: (
+              <>
+                <path d="M4 10h16" />
+                <path d="M4 14h16" />
+                <path d="M4 18h16" />
+                <path d="M4 6h16" />
+              </>
+            ),
+          },
+        ].map((kpi, i) => (
+          <div
+            key={i}
+            className="p-4 rounded-xl border border-border bg-card shadow-2xs flex flex-col justify-between group hover:border-primary/20 transition-all duration-200"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <span className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase truncate block">
+                {kpi.label}
+              </span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="p-1 rounded-md shrink-0 bg-primary/10 text-primary"
+              >
+                {kpi.icon}
+              </svg>
+            </div>
+
+            <div className="mt-3">
+              <h3 className="text-sm md:text-base font-semibold tracking-tight truncate font-mono text-foreground">
+                {kpi.value}
+              </h3>
+              <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                {kpi.desc}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* EXISTING FORECAST CARDS */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 w-full">
         {[
           {
             label: 'Forecasted Revenue',

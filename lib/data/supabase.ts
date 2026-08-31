@@ -259,7 +259,6 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
 
   const businessId = options?.businessId ?? await resolveBusinessId(client, userId)
   const lookbackMonths = options?.lookbackMonths ?? null
-  const displayRange = options?.displayRange ?? 'all'
 
   // Computed up-front so it can be pushed into the daily_operations query
   // itself (see below), instead of being applied only after fetching every
@@ -391,11 +390,13 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
     : labels.map(() => 0)
 
   const netIncomeSeries = revenueSeries.map((value, index) => value - (expenseSeries[index] ?? 0))
-  const visibleWindow = displayRange === '1y' ? 12 : displayRange === '2y' ? 24 : null
-  const visibleLabels = visibleWindow ? labels.slice(-visibleWindow) : labels
-  const visibleRevenueSeries = visibleWindow ? revenueSeries.slice(-visibleWindow) : revenueSeries
-  const visibleExpenseSeries = visibleWindow ? expenseSeries.slice(-visibleWindow) : expenseSeries
-  const visibleNetIncomeSeries = visibleWindow ? netIncomeSeries.slice(-visibleWindow) : netIncomeSeries
+  
+  // No slicing needed — database query already filtered by lookbackMonths.
+  // Use labels and series directly from resolveDateRange.
+  const visibleLabels = labels
+  const visibleRevenueSeries = revenueSeries
+  const visibleExpenseSeries = expenseSeries
+  const visibleNetIncomeSeries = netIncomeSeries
 
   const serviceSeries = new Map<number, number[]>()
   const serviceTotals = new Map<number, Map<string, number>>()
@@ -415,30 +416,11 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
     serviceSeries.set(service.id, bucketKeys.map((key) => totals.get(key) ?? 0))
   }
 
-  const visibleServiceSeries = new Map<number, number[]>()
-  for (const [serviceId, actuals] of serviceSeries.entries()) {
-    visibleServiceSeries.set(serviceId, visibleWindow ? actuals.slice(-visibleWindow) : actuals)
-  }
-
-  const visibleOperations = visibleWindow
-    ? operations.filter((row) => {
-        const rowDate = new Date(row.date)
-        if (Number.isNaN(rowDate.getTime())) return false
-        const cutoff = new Date()
-        cutoff.setMonth(cutoff.getMonth() - visibleWindow)
-        return rowDate >= cutoff
-      })
-    : operations
-
-  const visibleExpenseRows = visibleWindow
-    ? expenseRows.filter((row) => {
-        const rowDate = new Date(row.date)
-        if (Number.isNaN(rowDate.getTime())) return false
-        const cutoff = new Date()
-        cutoff.setMonth(cutoff.getMonth() - visibleWindow)
-        return rowDate >= cutoff
-      })
-    : expenseRows
+  // Use all data from the database query — no double-filtering.
+  // Database-level cutoff (lookbackMonths) already filtered the results.
+  const visibleServiceSeries = serviceSeries
+  const visibleOperations = operations
+  const visibleExpenseRows = expenseRows
 
   const serviceForecasts = services.map((service) => {
     const actuals = serviceSeries.get(service.id) ?? []
@@ -449,7 +431,7 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
       sma: forecastSeriesForModel(actuals, 3, Math.min(3, actuals.length), 'sma', undefined, seasonLength),
       naive: forecastSeriesForModel(actuals, 3, Math.min(3, actuals.length), 'naive', undefined, seasonLength),
     }
-    const lastActual = visibleActuals[visibleActuals.length - 1] ?? actuals[actuals.length - 1] ?? 0
+    const totalBookings = visibleActuals.reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0)
     const mapeByModel = Object.fromEntries(
       (Object.entries(forecastValuesByModel) as Array<[ForecastModel, number[]]>).map(([model]) => [model, `${calculateMape(actuals, model, Math.min(3, actuals.length)).toFixed(1)}%`])
     ) as Record<ForecastModel, string>
@@ -469,7 +451,7 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
       forecastsByModel: forecastValuesByModel,
       mape: mapeByModel.wma,
       mapeByModel,
-      bookings: lastActual,
+      bookings: totalBookings,
       price: service.price,
       forecastRevenue: forecastRevenueByModel.wma,
       forecastRevenueByModel,

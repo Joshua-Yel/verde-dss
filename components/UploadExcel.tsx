@@ -105,20 +105,94 @@ const normalizeNumber = (value: unknown): number | null => {
 };
 
 const normalizeDate = (value: unknown): string | null => {
-  if (value === null || value === undefined || value === '') return null;
-  if (typeof value === 'number' || (!isNaN(Number(value)) && String(value).trim() !== '')) {
-    const serial = Number(value);
-    if (Number.isFinite(serial)) {
-      const offset = serial > 59 ? serial - 1 : serial;
-      const ms = (offset - 25569) * 86400000;
-      const date = new Date(ms);
-      if (!Number.isNaN(date.getTime())) return date.toISOString().slice(0, 10);
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const pad = (n: number) => String(n).padStart(2, '0');
+
+  // Already a calendar date: YYYY-MM-DD
+  // Do NOT pass this through new Date().
+  if (typeof value === 'string') {
+    const text = value.trim();
+
+    const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+    if (isoMatch) {
+      const year = Number(isoMatch[1]);
+      const month = Number(isoMatch[2]);
+      const day = Number(isoMatch[3]);
+
+      const check = new Date(Date.UTC(year, month - 1, day));
+
+      if (
+        check.getUTCFullYear() === year &&
+        check.getUTCMonth() === month - 1 &&
+        check.getUTCDate() === day
+      ) {
+        return `${year}-${pad(month)}-${pad(day)}`;
+      }
+
+      return null;
     }
   }
-  const parsed = new Date(String(value));
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toISOString().slice(0, 10);
+
+  // Excel serial number.
+  //
+  // Excel's epoch is 1899-12-30.
+  // Use UTC components so the user's timezone cannot shift the date.
+  const serial =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && /^\d+(\.\d+)?$/.test(value.trim())
+        ? Number(value.trim())
+        : null;
+
+  if (serial !== null && Number.isFinite(serial) && serial >= 1) {
+    const wholeDays = Math.floor(serial);
+
+    const excelEpoch = Date.UTC(1899, 11, 30);
+
+    const date = new Date(
+      excelEpoch + wholeDays * 24 * 60 * 60 * 1000
+    );
+
+    if (!Number.isNaN(date.getTime())) {
+      return [
+        date.getUTCFullYear(),
+        pad(date.getUTCMonth() + 1),
+        pad(date.getUTCDate()),
+      ].join('-');
+    }
+  }
+
+  // JavaScript Date object.
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+
+    return [
+      value.getUTCFullYear(),
+      pad(value.getUTCMonth() + 1),
+      pad(value.getUTCDate()),
+    ].join('-');
+  }
+
+  // Last-resort parsing for other date formats.
+  if (typeof value === 'string') {
+    const parsed = new Date(value);
+
+    if (!Number.isNaN(parsed.getTime())) {
+      return [
+        parsed.getUTCFullYear(),
+        pad(parsed.getUTCMonth() + 1),
+        pad(parsed.getUTCDate()),
+      ].join('-');
+    }
+  }
+
+  return null;
 };
+
 
 const normalizeMonth = (value: unknown): string | null => {
   if (value === null || value === undefined || value === '') return null;
