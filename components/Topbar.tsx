@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useEffect, useState } from "react"
-import { Calendar, Upload, Menu } from "lucide-react"
+import { Calendar, Upload, Menu, Plus } from "lucide-react"
 
 import { useUI } from "./UIContext"
 import { Button } from "@/components/ui/button"
@@ -15,7 +15,7 @@ export default function Topbar({
   title = "Dashboard",
   onMenuClick,
 }: TopbarProps) {
-  const { toggleAI, setImportOpen, aiOpen } = useUI()
+  const { toggleAI, setImportOpen, setAddDataOpen, aiOpen } = useUI()
   const [dateRangeLabel, setDateRangeLabel] = useState<string | null>(null)
 
   useEffect(() => {
@@ -81,6 +81,15 @@ export default function Topbar({
           >
             <Upload className="h-4 w-4" />
             Import Data
+          </Button>
+
+          <Button
+            variant="outline"
+            className="hidden sm:flex gap-2"
+            onClick={() => setAddDataOpen(true)}
+          >
+            <Plus className="h-4 w-4" />
+            Add Data
           </Button>
 
           {/* Export now lives in the Sidebar under REPORTS → Export */}

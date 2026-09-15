@@ -7,6 +7,7 @@ import Topbar from '@/components/Topbar'
 import { UIProvider } from '@/components/UIContext'
 import AIPanelWrapper from '@/components/AIPanelWrapper'
 import ImportModal from '@/components/ImportModal'
+import AddDataModal from '@/components/AddDataModal'
 import { useAuth } from '@/app/auth-provider'
 import { canAccessModule, getUserRole } from '@/src/lib/roleAccess'
 
@@ -98,6 +99,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
         <AIPanelWrapper />
         <ImportModal />
+        <AddDataModal />
       </UIProvider>
     </div>
   )
