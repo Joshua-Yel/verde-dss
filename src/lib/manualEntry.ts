@@ -1,4 +1,4 @@
-import { normalizeDate } from './dateUtils.ts';
+import { normalizeDate } from './dateUtils';
 
 export type ManualEntryType = 'operation' | 'inventory' | 'expense' | 'staffing' | 'service';
 
