@@ -158,7 +158,7 @@ async function OverviewSubheading({ range }: { range: OverviewRange }) {
 
   return (
     <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
-      Financial trends, operational metrics, and predictive insights. {rangeText}.
+      Financial trends, operational metrics, and predictive insights.
     </p>
   );
 }
