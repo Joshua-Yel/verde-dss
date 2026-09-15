@@ -33,7 +33,6 @@ export type ManualInventoryInput = {
   stock?: unknown;
   reorder_point?: unknown;
   unit_cost?: unknown;
-  /** Optional movement fields for history-friendly raw_import rows */
   month?: unknown;
   purchased?: unknown;
   used?: unknown;
@@ -101,6 +100,8 @@ export type ManualServiceNormalized = {
   category: string | null;
   price: number | null;
 };
+
+export type FieldErrors = Record<string, string>;
 
 export function normalizeText(value: unknown): string {
   if (value === null || value === undefined) return '';
@@ -183,7 +184,6 @@ export function parseTimeOfDay(value: unknown): { time_of_day: string | null; ho
   return { time_of_day: raw, hour: null };
 }
 
-/** YYYY-MM from free text or date */
 export function normalizeMonth(value: unknown): string | null {
   if (value === null || value === undefined || value === '') return null;
   const raw = String(value).trim();
@@ -196,6 +196,14 @@ export function normalizeMonth(value: unknown): string | null {
   const date = normalizeDate(value);
   if (date) return date.slice(0, 7);
   return null;
+}
+
+function titleCaseCategory(value: string): string {
+  if (!value) return value;
+  return value
+    .split(/\s+/)
+    .map((w) => (w.length ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
+    .join(' ');
 }
 
 export function validateManualOperationInput(input: ManualOperationInput) {
@@ -214,15 +222,36 @@ export function validateManualOperationInput(input: ManualOperationInput) {
   };
 
   const errors: string[] = [];
+  const fieldErrors: FieldErrors = {};
 
-  if (!normalized.date) errors.push('Date is required.');
-  if (!normalized.service_name) errors.push('Service name is required.');
-  if (normalized.quantity === null) errors.push('Quantity is required.');
-  if (normalized.revenue === null) errors.push('Revenue is required.');
-  if (normalized.price !== null && normalized.price < 0) errors.push('Price cannot be negative.');
-  if (normalized.quantity !== null && normalized.quantity < 0) errors.push('Quantity cannot be negative.');
+  if (!normalized.date) {
+    errors.push('Date is required.');
+    fieldErrors.date = 'Required';
+  }
+  if (!normalized.service_name) {
+    errors.push('Service name is required.');
+    fieldErrors.service_name = 'Required';
+  }
+  if (normalized.quantity === null) {
+    errors.push('Quantity is required.');
+    fieldErrors.quantity = 'Required';
+  } else if (normalized.quantity < 0) {
+    errors.push('Quantity cannot be negative.');
+    fieldErrors.quantity = 'Cannot be negative';
+  }
+  if (normalized.revenue === null) {
+    errors.push('Revenue is required.');
+    fieldErrors.revenue = 'Required';
+  } else if (normalized.revenue < 0) {
+    errors.push('Revenue cannot be negative.');
+    fieldErrors.revenue = 'Cannot be negative';
+  }
+  if (normalized.price !== null && normalized.price < 0) {
+    errors.push('Price cannot be negative.');
+    fieldErrors.price = 'Cannot be negative';
+  }
 
-  return { normalized, errors };
+  return { normalized, errors, fieldErrors };
 }
 
 export function validateInventoryInput(input: ManualInventoryInput) {
@@ -241,33 +270,75 @@ export function validateInventoryInput(input: ManualInventoryInput) {
   };
 
   const errors: string[] = [];
-  if (!normalized.name) errors.push('Product / item name is required.');
+  const fieldErrors: FieldErrors = {};
+
+  if (!normalized.name) {
+    errors.push('Product / item name is required.');
+    fieldErrors.name = 'Required';
+  }
   if (normalized.stock === null && normalized.closing_stock === null) {
     errors.push('Current stock (or closing stock) is required.');
+    fieldErrors.stock = 'Required';
   }
-  if (normalized.stock !== null && normalized.stock < 0) errors.push('Stock cannot be negative.');
-  if (normalized.reorder_point !== null && normalized.reorder_point < 0) errors.push('Reorder point cannot be negative.');
-  if (normalized.unit_cost !== null && normalized.unit_cost < 0) errors.push('Unit cost cannot be negative.');
+  if (normalized.stock !== null && normalized.stock < 0) {
+    errors.push('Stock cannot be negative.');
+    fieldErrors.stock = 'Cannot be negative';
+  }
+  if (normalized.reorder_point !== null && normalized.reorder_point < 0) {
+    errors.push('Reorder point cannot be negative.');
+    fieldErrors.reorder_point = 'Cannot be negative';
+  }
+  if (normalized.unit_cost !== null && normalized.unit_cost < 0) {
+    errors.push('Unit cost cannot be negative.');
+    fieldErrors.unit_cost = 'Cannot be negative';
+  }
 
-  return { normalized, errors };
+  // Soft consistency warning (not a hard error)
+  if (
+    normalized.opening_stock !== null &&
+    normalized.purchased !== null &&
+    normalized.used !== null &&
+    normalized.closing_stock !== null
+  ) {
+    const expected = normalized.opening_stock + normalized.purchased - normalized.used;
+    if (Math.abs(expected - normalized.closing_stock) > 0.0001) {
+      // Informational only — do not block save
+    }
+  }
+
+  return { normalized, errors, fieldErrors };
 }
 
 export function validateExpenseInput(input: ManualExpenseInput) {
+  const rawCategory = normalizeText(input.category);
   const normalized: ManualExpenseNormalized = {
     date: normalizeDate(input.date),
-    category: normalizeText(input.category),
+    category: rawCategory ? titleCaseCategory(rawCategory) : '',
     amount: normalizeNumber(input.amount),
     notes: normalizeText(input.notes) || null,
     vendor: normalizeText(input.vendor) || null,
   };
 
   const errors: string[] = [];
-  if (!normalized.date) errors.push('Date is required.');
-  if (!normalized.category) errors.push('Expense category is required.');
-  if (normalized.amount === null) errors.push('Amount is required.');
-  if (normalized.amount !== null && normalized.amount < 0) errors.push('Amount cannot be negative.');
+  const fieldErrors: FieldErrors = {};
 
-  return { normalized, errors };
+  if (!normalized.date) {
+    errors.push('Date is required.');
+    fieldErrors.date = 'Required';
+  }
+  if (!normalized.category) {
+    errors.push('Expense category is required.');
+    fieldErrors.category = 'Required';
+  }
+  if (normalized.amount === null) {
+    errors.push('Amount is required.');
+    fieldErrors.amount = 'Required';
+  } else if (normalized.amount < 0) {
+    errors.push('Amount cannot be negative.');
+    fieldErrors.amount = 'Cannot be negative';
+  }
+
+  return { normalized, errors, fieldErrors };
 }
 
 export function validateStaffingInput(input: ManualStaffingInput) {
@@ -281,13 +352,27 @@ export function validateStaffingInput(input: ManualStaffingInput) {
   };
 
   const errors: string[] = [];
-  if (!normalized.date) errors.push('Date is required.');
-  if (!normalized.staff_name) errors.push('Staff name is required.');
-  if (normalized.hours_worked !== null && normalized.hours_worked < 0) {
-    errors.push('Hours worked cannot be negative.');
+  const fieldErrors: FieldErrors = {};
+
+  if (!normalized.date) {
+    errors.push('Date is required.');
+    fieldErrors.date = 'Required';
+  }
+  if (!normalized.staff_name) {
+    errors.push('Staff name is required.');
+    fieldErrors.staff_name = 'Required';
+  }
+  if (normalized.hours_worked !== null) {
+    if (normalized.hours_worked < 0) {
+      errors.push('Hours worked cannot be negative.');
+      fieldErrors.hours_worked = 'Cannot be negative';
+    } else if (normalized.hours_worked > 24) {
+      errors.push('Hours worked cannot exceed 24 in a day.');
+      fieldErrors.hours_worked = 'Max 24';
+    }
   }
 
-  return { normalized, errors };
+  return { normalized, errors, fieldErrors };
 }
 
 export function validateServiceInput(input: ManualServiceInput) {
@@ -298,38 +383,98 @@ export function validateServiceInput(input: ManualServiceInput) {
   };
 
   const errors: string[] = [];
-  if (!normalized.name) errors.push('Service name is required.');
-  if (normalized.price !== null && normalized.price < 0) errors.push('Price cannot be negative.');
+  const fieldErrors: FieldErrors = {};
 
-  return { normalized, errors };
+  if (!normalized.name) {
+    errors.push('Service name is required.');
+    fieldErrors.name = 'Required';
+  }
+  if (normalized.price !== null && normalized.price < 0) {
+    errors.push('Price cannot be negative.');
+    fieldErrors.price = 'Cannot be negative';
+  }
+
+  return { normalized, errors, fieldErrors };
 }
 
 export function validateManualEntry(
   type: ManualEntryType,
   body: Record<string, unknown>
-): { errors: string[]; normalized: Record<string, unknown> } {
+): { errors: string[]; fieldErrors: FieldErrors; normalized: Record<string, unknown> } {
   switch (type) {
     case 'operation': {
       const r = validateManualOperationInput(body);
-      return { errors: r.errors, normalized: r.normalized as unknown as Record<string, unknown> };
+      return {
+        errors: r.errors,
+        fieldErrors: r.fieldErrors,
+        normalized: r.normalized as unknown as Record<string, unknown>,
+      };
     }
     case 'inventory': {
       const r = validateInventoryInput(body);
-      return { errors: r.errors, normalized: r.normalized as unknown as Record<string, unknown> };
+      return {
+        errors: r.errors,
+        fieldErrors: r.fieldErrors,
+        normalized: r.normalized as unknown as Record<string, unknown>,
+      };
     }
     case 'expense': {
       const r = validateExpenseInput(body);
-      return { errors: r.errors, normalized: r.normalized as unknown as Record<string, unknown> };
+      return {
+        errors: r.errors,
+        fieldErrors: r.fieldErrors,
+        normalized: r.normalized as unknown as Record<string, unknown>,
+      };
     }
     case 'staffing': {
       const r = validateStaffingInput(body);
-      return { errors: r.errors, normalized: r.normalized as unknown as Record<string, unknown> };
+      return {
+        errors: r.errors,
+        fieldErrors: r.fieldErrors,
+        normalized: r.normalized as unknown as Record<string, unknown>,
+      };
     }
     case 'service': {
       const r = validateServiceInput(body);
-      return { errors: r.errors, normalized: r.normalized as unknown as Record<string, unknown> };
+      return {
+        errors: r.errors,
+        fieldErrors: r.fieldErrors,
+        normalized: r.normalized as unknown as Record<string, unknown>,
+      };
     }
     default:
-      return { errors: ['Unknown entry type.'], normalized: {} };
+      return { errors: ['Unknown entry type.'], fieldErrors: {}, normalized: {} };
   }
+}
+
+/** Client-side helper: soft warning when qty × price ≠ revenue. */
+export function revenuePriceWarning(quantity: string, price: string, revenue: string): string | null {
+  const q = normalizeNumber(quantity);
+  const p = normalizeNumber(price);
+  const r = normalizeNumber(revenue);
+  if (q === null || p === null || r === null) return null;
+  const expected = q * p;
+  if (Math.abs(expected - r) > 0.05) {
+    return `Qty × price = ${expected.toFixed(2)}, but revenue is ${r.toFixed(2)}.`;
+  }
+  return null;
+}
+
+/** Client-side helper: inventory movement balance check. */
+export function inventoryBalanceWarning(
+  opening: string,
+  purchased: string,
+  used: string,
+  closing: string
+): string | null {
+  const o = normalizeNumber(opening);
+  const p = normalizeNumber(purchased);
+  const u = normalizeNumber(used);
+  const c = normalizeNumber(closing);
+  if (o === null || p === null || u === null || c === null) return null;
+  const expected = o + p - u;
+  if (Math.abs(expected - c) > 0.0001) {
+    return `Opening + purchased − used = ${expected}, but closing is ${c}.`;
+  }
+  return null;
 }

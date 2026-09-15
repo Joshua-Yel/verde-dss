@@ -44,6 +44,7 @@ interface InventoryRow {
 }
 
 interface OperationRow {
+  id?: number
   date: string
   quantity: number | null
   revenue: number | null
@@ -292,7 +293,7 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
 
     let operationQueryBuilder = client
       .from('daily_operations')
-      .select('date,quantity,revenue,service_id,time_of_day,hour')
+      .select('id,date,quantity,revenue,service_id,time_of_day,hour')
       .eq('business_id', businessId)
 
     if (cutoffDateISO) {
@@ -607,6 +608,8 @@ const getDashboardDataForUser = async (userId: string, options?: DashboardDataOp
       const day = new Date(op.date).toLocaleDateString('en-US', { weekday: 'long' })
       const service = op.service_id !== null ? serviceMap.get(op.service_id) : undefined
       return {
+        id: op.id ?? null,
+        service_id: op.service_id ?? null,
         date: op.date,
         day,
         sessions: op.quantity,

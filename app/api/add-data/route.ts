@@ -42,7 +42,6 @@ async function upsertService(
   }
 
   if (existingService?.id) {
-    // Optionally refresh category/price when provided
     if (category !== null || price !== null) {
       const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
       if (category !== null) patch.category = category;
@@ -89,6 +88,7 @@ async function handleOperation(businessId: string, normalized: ManualOperationNo
     revenue: normalized.revenue,
   };
 
+  // time_of_day / hour may already exist on some deployments — try, then fall back.
   const insertPayload = {
     ...baseOperation,
     ...(normalized.time_of_day !== null ? { time_of_day: normalized.time_of_day } : {}),
@@ -99,7 +99,6 @@ async function handleOperation(businessId: string, normalized: ManualOperationNo
 
   if (insertError) {
     const message = insertError.message ?? '';
-    // Columns time_of_day / hour may not exist on older DBs — fall back.
     if (/time_of_day|hour/i.test(message)) {
       const { error: fallbackError } = await supabaseServer.from('daily_operations').insert(baseOperation);
       if (fallbackError) {
@@ -110,22 +109,43 @@ async function handleOperation(businessId: string, normalized: ManualOperationNo
     }
   }
 
+  // Notes are not a column on daily_operations — store audit side-row in raw_imports (no schema change).
+  if (normalized.notes) {
+    await supabaseServer.from('raw_imports').insert({
+      business_id: businessId,
+      filename: `manual-operation-note-${normalized.date}.json`,
+      data: [
+        {
+          entry_type: 'operation_note',
+          source: 'manual_entry',
+          date: normalized.date,
+          service_name: normalized.service_name,
+          service_id: serviceResult.id,
+          quantity: normalized.quantity,
+          revenue: normalized.revenue,
+          notes: normalized.notes,
+          time_of_day: normalized.time_of_day,
+          hour: normalized.hour,
+        },
+      ],
+    });
+  }
+
   revalidateForBusiness(businessId);
-  return NextResponse.json({ message: 'Daily log record saved successfully.', type: 'operation' });
+  return NextResponse.json({
+    message: 'Daily log record saved. It will appear on Overview and Daily Log.',
+    type: 'operation',
+  });
 }
 
 async function handleInventory(businessId: string, normalized: ManualInventoryNormalized) {
-  const stock =
-    normalized.stock ??
-    normalized.closing_stock ??
-    0;
+  const stock = normalized.stock ?? normalized.closing_stock ?? 0;
   const reorderPoint = normalized.reorder_point ?? 0;
   const unitCost = normalized.unit_cost ?? 0;
 
-  // Upsert by name (case-insensitive match within workspace)
   const { data: existing, error: findError } = await supabaseServer
     .from('inventory_items')
-    .select('id, stock')
+    .select('id, stock, name')
     .eq('business_id', businessId)
     .ilike('name', normalized.name)
     .limit(1)
@@ -134,6 +154,8 @@ async function handleInventory(businessId: string, normalized: ManualInventoryNo
   if (findError) {
     return NextResponse.json({ error: findError.message }, { status: 500 });
   }
+
+  const previousStock = existing?.stock ?? null;
 
   if (existing?.id) {
     const { error: updateError } = await supabaseServer
@@ -165,42 +187,41 @@ async function handleInventory(businessId: string, normalized: ManualInventoryNo
     }
   }
 
-  // Also append a movement-shaped row into raw_imports so inventory analytics
-  // (month / used / purchased / opening / closing) stay consistent with Excel imports.
   const hasMovement =
     normalized.month ||
     normalized.purchased !== null ||
     normalized.used !== null ||
     normalized.opening_stock !== null ||
-    normalized.closing_stock !== null;
+    normalized.closing_stock !== null ||
+    normalized.notes;
 
   if (hasMovement) {
-    const month =
-      normalized.month ??
-      new Date().toISOString().slice(0, 7);
+    const month = normalized.month ?? new Date().toISOString().slice(0, 7);
 
     const movementRow = {
       product_name: normalized.name,
-      Product_Name: normalized.name,
+      'Product Name': normalized.name,
+      product: normalized.name,
       name: normalized.name,
       month,
       Month: month,
       opening_stock: normalized.opening_stock ?? null,
-      Opening_Stock: normalized.opening_stock ?? null,
+      'Opening Stock': normalized.opening_stock ?? null,
       purchased: normalized.purchased ?? null,
       Purchased: normalized.purchased ?? null,
       used: normalized.used ?? null,
       Used: normalized.used ?? null,
       closing_stock: normalized.closing_stock ?? stock,
-      Closing_Stock: normalized.closing_stock ?? stock,
+      'Closing Stock': normalized.closing_stock ?? stock,
       supplier: normalized.supplier,
       Supplier: normalized.supplier,
       reorder_point: reorderPoint,
-      Reorder_Point: reorderPoint,
+      'Reorder Point': reorderPoint,
       unit_cost: unitCost,
-      Unit_Cost: unitCost,
+      'Unit Cost': unitCost,
       notes: normalized.notes,
       source: 'manual_entry',
+      entry_type: 'inventory_movement',
     };
 
     await supabaseServer.from('raw_imports').insert({
@@ -211,15 +232,23 @@ async function handleInventory(businessId: string, normalized: ManualInventoryNo
   }
 
   revalidateForBusiness(businessId);
+
+  const stockMsg =
+    previousStock !== null && previousStock !== stock
+      ? ` Stock ${previousStock} → ${stock}.`
+      : '';
+
   return NextResponse.json({
-    message: existing?.id ? 'Inventory item updated successfully.' : 'Inventory item added successfully.',
+    message: existing?.id
+      ? `Inventory item updated.${stockMsg}`
+      : 'Inventory item added successfully.',
     type: 'inventory',
+    previousStock,
+    stock,
   });
 }
 
 async function handleExpense(businessId: string, normalized: ManualExpenseNormalized) {
-  // Expenses are consumed from raw_imports rows that expose date / category / amount.
-  // Mirror both camel and common Excel header variants so existing parsers match.
   const expenseRow = {
     date: normalized.date,
     Date: normalized.date,
@@ -233,6 +262,7 @@ async function handleExpense(businessId: string, normalized: ManualExpenseNormal
     vendor: normalized.vendor,
     Vendor: normalized.vendor,
     source: 'manual_entry',
+    entry_type: 'expense',
   };
 
   const { error } = await supabaseServer.from('raw_imports').insert({
@@ -246,17 +276,19 @@ async function handleExpense(businessId: string, normalized: ManualExpenseNormal
   }
 
   revalidateForBusiness(businessId);
-  return NextResponse.json({ message: 'Expense recorded successfully.', type: 'expense' });
+  return NextResponse.json({
+    message: 'Expense recorded. It will appear on Financials and net-income charts.',
+    type: 'expense',
+  });
 }
 
 async function handleStaffing(businessId: string, normalized: ManualStaffingNormalized) {
-  // No dedicated staffing table yet — store structured rows in raw_imports for audit
-  // and future parsing. Staffing page itself is demand-driven from daily_operations.
   const staffRow = {
     date: normalized.date,
     Date: normalized.date,
     staff_name: normalized.staff_name,
     Staff_Name: normalized.staff_name,
+    'Staff Name': normalized.staff_name,
     role: normalized.role,
     Role: normalized.role,
     hours_worked: normalized.hours_worked,
@@ -281,7 +313,8 @@ async function handleStaffing(businessId: string, normalized: ManualStaffingNorm
 
   revalidateForBusiness(businessId);
   return NextResponse.json({
-    message: 'Staffing log saved. Peak-hour staffing plans still use service demand forecasts.',
+    message:
+      'Staffing log saved (audit). Peak-hour plans still use service-demand forecasts on the Staffing page.',
     type: 'staffing',
   });
 }
@@ -293,7 +326,10 @@ async function handleService(businessId: string, normalized: ManualServiceNormal
   }
 
   revalidateForBusiness(businessId);
-  return NextResponse.json({ message: 'Service catalog entry saved successfully.', type: 'service' });
+  return NextResponse.json({
+    message: 'Service catalog entry saved. You can now log sessions under Daily Log.',
+    type: 'service',
+  });
 }
 
 export async function POST(request: Request) {
@@ -313,7 +349,10 @@ export async function POST(request: Request) {
 
     const validation = validateManualEntry(type, body);
     if (validation.errors.length > 0) {
-      return NextResponse.json({ error: validation.errors.join(' ') }, { status: 400 });
+      return NextResponse.json(
+        { error: validation.errors.join(' '), fieldErrors: validation.fieldErrors },
+        { status: 400 }
+      );
     }
 
     const businessId = await resolveBusinessIdForUser(supabaseServer, user);
